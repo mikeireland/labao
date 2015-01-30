@@ -1,0 +1,73 @@
+########################################################################
+# Makefile                                                             #
+#                                                                      #
+# For labao system.   					   	       #
+#                                                                      #
+########################################################################
+#                                                                      #
+#		THE CHARA ARRAY					       #
+#     Center for High Angular Resolution Astronomy                     #
+# Georgia State University, Atlanta GA 30303-3083, U.S.A.              #
+#                                                                      #
+#                                                                      #
+# Telephone: 1-626-796-5405                                            #
+# Fax      : 1-626-796-6717                                            #
+# email    : theo@chara.gsu.edu                                        #
+# WWW      : http:www.chara.gsu.edu 		                       #
+#                                                                      #
+# (C) This source code and its associated executable                   #
+# program(s) are copyright.                                            #
+#                                                                      #
+########################################################################
+#                                                                      #
+# Author : Theo ten Brummelaar                                         #
+# Date   : Feb 2014      					       #
+########################################################################
+
+#
+# Some definitions
+#
+
+CC = gcc
+KCC = kgcc
+LCFLAGS = -g -O2 -Wall -DUSE_RT
+LFLAGS = -lueye_api -lzernike -ledac40 -lastroui -lastromod -lclockui -lcharaui -lchara -lcfitsio -lncurses -lnsimpleX -lX11 -lsla -lnrc -luiclient -lsockman -lclient -lrwfits -lnrc -pthread -lm -lz 
+MODDIR = /usr/local/modules
+LIBDIR = /usr/local/lib
+INCDIR = /usr/local/include
+HELPDIR = /usr/local/lib/ui_help
+BINDIR = /usr/local/bin
+ETCDIR = /ctrscrut/chara/etc
+#
+# The targets
+#
+
+all: 
+
+#
+# The application target. This is to run in straight linux
+#
+
+OFILES = labao.o\
+	 labao_background.o\
+	 labao_functs.o\
+	 labao_messages.o\
+	 labao_edac40.o\
+	 labao_zernike.o\
+	 labao_usb_camera.o\
+	 labao_fsm.o
+
+#
+# Cleanup
+#
+
+clean:
+	rm -f core *~ $(OFILES) labao zernike_test.dat
+
+#
+# install
+#
+
+install: 
+
+uninstall:

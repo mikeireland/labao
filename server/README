@@ -1,0 +1,6 @@
+Sometimes crashes on line 544 of USB stuff when you reload the default.
+and 1068
+Make sure camera display is off before excit.
+Also it is locking on line 356 of USB stuff.
+We need to add mean and stddev calculation to dark frame and use it for thresholding the data just as we do in WFS2
+We need to move the Tip/tilt astigmatism and so on calculations into real time part of the code.

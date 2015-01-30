@@ -1,0 +1,4 @@
+#!/bin/bash
+# 
+# Script to launch oplegtk on appropriate socket
+/usr/local/bin/labaogtk $1 $2 $3 $4 $5&

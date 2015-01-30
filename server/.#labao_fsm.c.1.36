@@ -1,0 +1,2216 @@
+/************************************************************************/
+/* labao_fsm.c								*/
+/*                                                                      */
+/* The Finite State Machine for the Lab AO 				*/
+/************************************************************************/
+/*                                                                      */
+/*                    CHARA ARRAY USER INTERFACE			*/
+/*                 Based on the SUSI User Interface			*/
+/*		In turn based on the CHIP User interface		*/
+/*                                                                      */
+/*            Center for High Angular Resolution Astronomy              */
+/*              Mount Wilson Observatory, CA 91001, USA			*/
+/*                                                                      */
+/* Telephone: 1-626-796-5405                                            */
+/* Fax      : 1-626-796-6717                                            */
+/* email    : theo@chara.gsu.edu                                        */
+/* WWW      : http://www.chara.gsu.edu					*/
+/*                                                                      */
+/* (C) This source code and its associated executable                   */
+/* program(s) are copyright.                                            */
+/*                                                                      */
+/************************************************************************/
+/*                                                                      */
+/* Author : Michael Ireland 						*/
+/* Date   : March 2014							*/
+/************************************************************************/
+
+#include "labao.h"
+
+/* Default number of loops for different states */
+
+#define NUM_LABAO_ZERO_AVG 100
+#define NUM_RECON_WAIT 2
+#define NUM_RECON_AVG 10
+#define NUM_RECON_CYCLES 10
+#define DM_DEFAULT  0.7
+#define ACTUATOR_POKE  0.2
+#define NUM_INNER_ACTUATORS 19
+#define DEFAULT_AUTOALIGN_COUNT 20
+#define LAB_ALIGN_STEP		50
+#define SCOPE_ALIGN_STEP	100
+
+/* Optionally enforce zero piston. With SERVO_DAMPING < 1 and a reasonable reconstructor,
+   this shouldn't be needed */
+#define ENFORCE_ZERO_PISTON
+
+/* Centroid calculation number */
+
+#define CENTROID_WINDOW_WIDTH 5
+#define CENTROID_HW (CENTROID_WINDOW_WIDTH/2)
+#define CLEAR_EDGE ((CENTROID_BOX_WIDTH/2) + (CENTROID_WINDOW_WIDTH/2))
+#warning WE NEED TO THINK ABOUT THESE NUMBERS
+#define ZERO_CLAMP 20
+#define DENOM_CLAMP 30
+#define FLUX_DAMPING 0.9
+
+static const float centroid_window[][CENTROID_WINDOW_WIDTH] = 
+	{{0,1,1,1,0}, 
+	 {1,1,1,1,1},
+	 {1,1,1,1,1},
+	 {1,1,1,1,1},
+	 {0,1,1,1,0}};
+
+static float centroid_xw[CENTROID_WINDOW_WIDTH][CENTROID_WINDOW_WIDTH];
+static float centroid_yw[CENTROID_WINDOW_WIDTH][CENTROID_WINDOW_WIDTH];
+                         
+/* Possible centroiding types */
+
+#define CENTROID_WINDOW_ONLY 0
+#define CENTROID_NONLINEAR   1
+
+/* Maximum number of elements in a saved report */
+
+#define MAX_ABERRATIONS_RECORD      10000
+#define MAX_DATA_RECORD         10000
+
+/*
+ * Some important local globals. PHILOSOPHY: Using these is a little tricky, as
+ * numerical recipes in C doesn't have basic vector and matrix multiplication
+ * built in. We will therefore use standard C syntax rather than NRC syntax, 
+ * and cast arrays to NRC syntax only when NRC routines are to be used.
+ */
+
+#warning We should be able to change this on the fly.
+
+static int fsm_centroid_type=CENTROID_NONLINEAR;
+static int fsm_ignore_tilt=TRUE;
+static float fsm_reconstructor[NUM_ACTUATORS][2*NUM_LENSLETS];
+static float fsm_actuator_to_sensor[NUM_ACTUATORS][2*NUM_LENSLETS];
+static float fsm_xc_int[NUM_LENSLETS];
+static float fsm_yc_int[NUM_LENSLETS];
+static int fsm_cyclenum=0;
+static float fsm_flat_dm[NUM_ACTUATORS];
+static float fsm_dm_offset[NUM_ACTUATORS];
+static pthread_mutex_t fsm_mutex = PTHREAD_MUTEX_INITIALIZER;
+static int actuator=1;
+static int wfs_results_num = ((int)DEFAULT_FRAME_RATE);
+static int wfs_results_n = 0;
+static bool autoalign_lab_dichroic = FALSE;
+static bool autoalign_scope_dichroic = FALSE;
+static	int autoalign_count = 0;
+static float zero_clamp = ZERO_CLAMP;
+static float denom_clamp = DENOM_CLAMP;
+static bool set_center = FALSE;
+static bool new_aberrations = FALSE;
+static int aberrations_record_num = 0;
+static int aberrations_record_count = 0;
+static struct s_labao_wfs_results aberrations_record[MAX_ABERRATIONS_RECORD];
+
+/* Globals. */
+
+int fsm_state = FSM_CENTROIDS_ONLY;
+float x_centroid_offsets[NUM_LENSLETS];
+float y_centroid_offsets[NUM_LENSLETS];
+float xc[NUM_LENSLETS];
+float yc[NUM_LENSLETS];
+float avg_fluxes[NUM_LENSLETS];
+struct s_labao_wfs_results wfs_results;
+struct s_labao_wfs_results calc_labao_results;
+
+/************************************************************************/
+/* initialize_fsm()							*/
+/*									*/
+/* Initialize the finite state machine.					*/
+/************************************************************************/
+
+void initialize_fsm(void)
+{
+	int	i, j;
+
+	calc_labao_results.xtilt = 0.0;
+	calc_labao_results.ytilt = 0.0;
+	calc_labao_results.xpos = 0.0;
+	calc_labao_results.ypos = 0.0;
+	calc_labao_results.focus = 0.0;
+	calc_labao_results.a1 = 0.0;
+	calc_labao_results.a2 = 0.0;
+
+	wfs_results.xtilt = 0.0;
+	wfs_results.ytilt = 0.0;
+	wfs_results.xpos = 0.0;
+	wfs_results.ypos = 0.0;
+	wfs_results.focus = 0.0;
+	wfs_results.a1 = 0.0;
+	wfs_results.a2 = 0.0;
+
+	wfs_results_n = 0;
+
+	for (i=0; i<NUM_ACTUATORS; i++)
+	for (j=0; j<2*NUM_LENSLETS; j++)
+	{
+		fsm_reconstructor[i][j]=0.0;
+		fsm_actuator_to_sensor[i][j]=0.0;
+	}
+
+	for (i=0;i<NUM_ACTUATORS;i++)
+	{
+		fsm_flat_dm[i]=DM_DEFAULT;
+		fsm_dm_offset[i]=0.0;	
+	}
+
+	for (i=0;i<NUM_LENSLETS;i++)
+	{
+		x_centroid_offsets[i]=0.0;
+		y_centroid_offsets[i]=0.0;
+	}
+
+	for (i=0;i<CENTROID_WINDOW_WIDTH;i++)
+	for (j=0;j<CENTROID_WINDOW_WIDTH;j++)
+	{
+		centroid_xw[i][j] = (i-CENTROID_HW)*centroid_window[i][j];
+		centroid_yw[i][j] = (j-CENTROID_HW)*centroid_window[i][j];
+	}
+	/* Create  Mutex for this */
+
+	if (pthread_mutex_init(&fsm_mutex, NULL) != 0)
+		error(FATAL, "Unable to create fsm mutex.");
+
+} /* initialize_fsm() */
+	
+/************************************************************************/
+/* load_defaults()							*/
+/*									*/
+/* Load the subarray and the WFS targets.				*/
+/* Returns								*/
+/* 0 - All went well.							*/
+/* -1 No file to open.							*/
+/* -2 Failed to get AOI.						*/
+/* -3 Failed to get X/Y position for centroid.				*/
+/* -4 Failed to interpret X/Y position					*/
+/* -5 Failed to set default AOI						*/
+/* -6 Failed to get flat wavefront positions				*/
+/* -7 Failed to interpret flat wavefront positionss			*/
+/* -8 Centroid offsets too close to edge				*/
+/* -9 Failed to send a flat wavefront to the DM				*/
+/* -10 Failed to read pupil center					*/
+/************************************************************************/
+
+int load_defaults(char* filename_in)
+{
+	char filename[256], s[256];
+	FILE *params_file;
+	int x,y,dx,dy,i;
+	float xoff, yoff;
+
+	if (filename_in != NULL)
+	{
+ 		sprintf(filename,"%s%s", get_etc_directory(s), filename_in);
+	}
+	else 
+	{
+    		sprintf(filename,"%s%s.dat", get_etc_directory(s), labao_name);
+	}
+
+  	/* Start with the defaults, in case there is a problem loading */
+  
+  	if ((params_file = fopen(filename,"r")) == NULL ) return -1;
+
+  	if (GetDataLine(s, 80, params_file) == -1)
+	{
+  		fclose(params_file);
+  		return -1;
+  	}
+
+	/* Get the default area of interest. */
+
+  	if (sscanf(s, "%d %d %d %d", &x, &y, &dx, &dy) != 4) return -2;
+
+	/* Get the default X/Y positions of the centroids */
+
+  	for (i=0;i<NUM_LENSLETS;i++)
+	{
+		if (GetDataLine(s, 80, params_file) == -1)
+		{
+			fclose(params_file);
+			return -3;
+		}
+
+		if (sscanf(s, "%f %f", &xoff, &yoff) != 2)
+		{
+			fclose(params_file);
+			return -4;
+		}
+		/* Sanity check these numbers */
+		if ((xoff < CLEAR_EDGE) || (yoff < CLEAR_EDGE) || 
+		    (xoff >= dx-CLEAR_EDGE) || (yoff >= dy-CLEAR_EDGE)){
+			return -8;
+		}
+		x_centroid_offsets[i] = xoff;
+		y_centroid_offsets[i] = yoff;
+	}
+	
+	/* Load the "flat" wavefront definition */
+	
+	for (i=0;i<NUM_ACTUATORS;i++)
+	{
+		if (GetDataLine(s, 80, params_file) == -1)
+		{
+			fclose(params_file);
+			return -6;
+		}
+
+		if (sscanf(s, "%f", fsm_flat_dm+i) != 1)
+		{
+			fclose(params_file);
+			return -7;
+		}
+	}
+	
+	/* Load the pupil center */
+
+	if (GetDataLine(s, 80, params_file) == -1)
+	{
+		fclose(params_file);
+		return -10;
+	}
+
+	if (sscanf(s, "%f %f", &xpos_center, &ypos_center) != 2)
+	{
+		fclose(params_file);
+		return -10;
+	}
+
+	fclose(params_file);
+
+	/* Set a flat wavefront. */
+	
+	if (flatten_wavefront()) return -9;
+
+	/* Tell clients */
+
+	send_labao_value_all_channels(TRUE);
+
+	/* 
+  	 * Try to set the AOI.
+	 * This was moved so that even if the camera isn't there
+	 * we get a flat wavefront.
+	 */
+
+	if (set_usb_camera_aoi(x, y, dx, dy)) return -5;
+
+	return 0;
+
+} /* load_defaults() */
+
+/************************************************************************/
+/* call_load_defaults()							*/
+/*									*/
+/* Load the subarray and the WFS targets.				*/
+/************************************************************************/
+
+int call_load_defaults(int argc, char **argv)
+{
+	int	retval = 0;
+
+	if (argc > 1)
+	{
+		retval = load_defaults(argv[1]);
+	}
+	else
+	{
+		retval = load_defaults(NULL); 
+	}
+
+	switch (retval)
+	{
+		case 0: message(system_window,
+			"Centroid offsets and AOI succesfully loaded!");
+			send_labao_text_message(
+			"Centroid offsets and AOI succesfully loaded!");
+			return NOERROR;
+
+		case -1: return error(ERROR,"No file to open.");
+
+		case -2: return error(ERROR,"Failed to get AOI.");
+
+		case -3: return error(ERROR,
+				"Failed to get X/Y position for centroid.");
+
+		case -4: return error(ERROR,"Failed to interpret X/Y position");
+
+		case -5: if (usb_cammera_is_running())
+				return ERROR;
+			 else
+				return error(ERROR,"Failed to set default AOI");
+
+		case -6: return error(ERROR,"Failed to get actuator positions for flat wavefront.");
+		
+		case -7: return error(ERROR,"Failed to get interpret positions for flat wavefront.");
+
+		case -8: return error(ERROR,"Failed to send a flat wavefront to the DM.");
+
+		default: return error(ERROR,
+				"Unknown problem with loading defaults.");
+	}
+
+	return NOERROR;
+
+} /* call_load_defaults() */
+
+/************************************************************************/
+/* save_defaults()							*/
+/*									*/
+/* Save the AOI and the WFS targets.					*/
+/* Returns:								*/
+/* 0 if all is OK.							*/
+/* -1 if failed to open file.						*/
+/************************************************************************/
+
+int save_defaults(char* filename_in)
+{
+	char filename[256], s[256];
+	FILE *params_file;
+	int x,y,dx,dy,i;
+
+	if (filename_in != NULL)
+	{
+ 		sprintf(filename,"%s%s", get_etc_directory(s),filename_in);
+	}
+	else
+	{
+		sprintf(filename,"%s%s.dat", get_etc_directory(s), labao_name);
+        }
+
+  	/* Start with the defaults, in case there is a problem loading */
+  
+  	if ((params_file = fopen(filename,"w")) == NULL ) return -1;
+
+  	/* Get the current AOI and save this */
+
+  	get_usb_camera_aoi(&x,&y,&dx,&dy);
+
+	fprintf(params_file, "# Default file %s\n", labao_name);
+	fprintf(params_file, "# Default AOI\n");
+  	fprintf(params_file, "%d %d %d %d\n", x, y, dx, dy);
+
+	/* Now go through the lenslets offsets */
+
+	fprintf(params_file, "# Default Lenslet X/Y positions.\n");
+  	for (i=0;i<NUM_LENSLETS;i++)
+	{
+		fprintf(params_file, "%7.2f %7.2f\n",
+			x_centroid_offsets[i], y_centroid_offsets[i]);
+	}
+
+	/* Save the "flat" wavefront definition */
+
+	fprintf(params_file,
+		"# Default actuator positions for a flat wavefront.\n");	
+	for (i=0;i<NUM_ACTUATORS;i++)
+	{
+		fprintf(params_file, "%f\n", fsm_flat_dm[i]);
+	}
+
+	/* Save the "Center" of the pupil */
+
+	fprintf(params_file, "# Default center position for pupil\n");
+	fprintf(params_file, "%f %f\n", xpos_center, ypos_center);
+
+	/* That is all. */
+
+	fclose(params_file);
+
+	return 0;
+	
+} /* save_defaults() */
+
+/************************************************************************/
+/* call_save_defaults()							*/
+/*									*/
+/* User callable version.						*/
+/************************************************************************/
+
+int call_save_defaults(int argc, char **argv)
+{
+	if (argc > 1)
+	{
+		if (save_defaults(argv[1])) 
+			return error (ERROR, "Error saveing defaults.");
+	}
+	else 
+	{
+		if (save_defaults(NULL)) 
+			return error (ERROR, "Error saveing defaults.");
+	}
+
+	message(system_window,  "Centroid offsets and AOI succesfully saved!");
+	send_labao_text_message("Centroid offsets and AOI succesfully saved!");
+
+	return NOERROR;
+
+}	/* call_save_defaults() */
+
+/************************************************************************/
+/* load_reconstructor()							*/
+/*									*/
+/* Load the reconstructor (space-separated, N_ACTUATORS rows,           */
+/*  2*N_LENSLETS columns)						*/
+/* Errors: -1: No file							*/
+/* -2: Not enough data lines						*/
+/* -3: Not a floating point number. 					*/
+/* -4: Not enough numbers in one of the lines.				*/
+/************************************************************************/
+
+int load_reconstructor(char* filename_in)
+{
+	char filename[256], s[256];
+	char *substr;
+	int i,j;
+	FILE *params_file;
+
+	if (filename_in != NULL)
+	{
+ 		strcpy(filename, filename_in);
+	}
+	else 
+	{
+    		sprintf(filename,"%s%s_recon.dat", get_etc_directory(s), 
+			labao_name);
+	}
+
+  	/* Start with the defaults, in case there is a problem loading */
+  
+  	if ((params_file = fopen(filename,"r")) == NULL ) return -1;
+	
+	for (i=0;i<NUM_ACTUATORS;i++)
+	{
+		if (GetDataLine(s, 1024, params_file) == -1)
+		{
+  			fclose(params_file);
+  			return -2;
+  		}
+  		substr = s;
+
+#warning There has to be a library way to do this bit... 
+#warning but what library function? A bug in this bit originally wasted a day...
+
+		for (j=0;j<2*NUM_LENSLETS;j++)
+		{
+			/* Remove opening spaces */
+			while (substr[0] == ' ') substr++;
+			/* Find the next floating point number */
+			if (sscanf(substr,"%f",&(fsm_reconstructor[i][j])) != 1)
+			{
+				fclose(params_file);
+				return -3;
+			}	
+			/* Move to the the next float */
+			if ( (substr = strstr(substr," ")) == NULL)
+			{
+				fclose(params_file);
+				return -4;
+			}
+//			fprintf(stderr, "%6.3f ", fsm_reconstructor[i][j]);
+		}
+//		fprintf(stderr, "\n");
+	}
+
+	fclose(params_file);
+
+	return 0;
+
+} /* load_reconstructor() */
+
+/************************************************************************/
+/* call_load_reconstructor()						*/
+/*									*/
+/* User callable for load_reconstructor.				*/
+/************************************************************************/
+
+int call_load_reconstructor(int argc, char **argv)
+{
+	int	retval = 0;
+
+	if (argc > 1)
+	{
+		retval = load_reconstructor(argv[1]);
+	}
+	else
+	{
+		retval = load_reconstructor(NULL); 
+	}
+
+	switch (retval)
+	{
+		case 0: message(system_window,
+			"Reconstructor successfully loaded!");
+			send_labao_text_message(
+			"Reconstructor successfully loaded!");
+			return NOERROR;
+
+		case -1: return error(ERROR,"No file to open.");
+
+		case -2: return error(ERROR,"Not enough data lines.");
+
+		case -3: return error(ERROR,
+				"Non-floating point number (or not enough).");
+
+		case -4: return error(ERROR,
+				"Not enough space-separated floats per line.");
+
+		default: return error(ERROR,
+				"Unknown problem with loading reconstructor.");
+	}
+
+	return NOERROR;
+
+} /* call_load_reconstructor() */
+
+/************************************************************************/
+/* save_actuator_to_sensor()						*/
+/*									*/
+/* Save the actuator to sensor matrix, used to create the reconstructor */ 
+/************************************************************************/
+
+int save_actuator_to_sensor(char* filename_in)
+{
+	char filename[256], s[256];
+	FILE *params_file;
+	int i,j;
+
+	if (filename_in != NULL)
+	{
+ 		strcpy(filename, filename_in);
+	}
+	else
+	{
+		sprintf(filename,"%s%s_actuator_to_sensor.dat", 
+			get_data_directory(s), labao_name);
+        }
+
+  	/* Start with the defaults, in case there is a problem loading */
+  
+  	if ((params_file = fopen(filename,"w")) == NULL ) return -1;
+
+  	/* Get the current AOI and save this */
+
+	fprintf(params_file, "# Actuator to sensor matrix %s\n", labao_name);
+	fprintf(params_file, "# One line of sensor movement per actuator \n");
+	for (i=0;i<NUM_ACTUATORS;i++)
+	{
+		for (j=0;j<2*NUM_LENSLETS;j++)
+			fprintf(params_file, "%6.2f ", 
+				fsm_actuator_to_sensor[i][j]);
+		fprintf(params_file, "\n");
+	}
+
+	/* That is all. */
+
+	fclose(params_file);
+
+	return 0;
+	
+} /* save_actuator_to_sensor() */
+
+/************************************************************************/
+/* call_save_actuator_to_sensor()					*/
+/*									*/
+/* User callable version of save_actuator_to_sensor.			*/
+/************************************************************************/
+
+int call_save_actuator_to_sensor(int argc, char **argv)
+{
+	if (argc > 1)
+	{
+		if (save_actuator_to_sensor(argv[1])) 
+			return error (ERROR,
+				"Error saving actuator to sensor matrix.");
+	}
+	else 
+	{
+		if (save_actuator_to_sensor(NULL)) 
+			return error (ERROR,
+				"Error saving actuator to sensor matrix.");
+	}
+
+	message(system_window, "Acuator to sensor matrix succesfully saved!");
+	send_labao_text_message("Acuator to sensor matrix succesfully saved!");
+
+	return NOERROR;
+
+}	/* call_save_actuator_to_sensor() */
+
+
+/************************************************************************/
+/* run_centroids_and_fsm()						*/
+/*									*/
+/* The callback function that computes centroids and runs the FSM.	*/
+/************************************************************************/
+
+void run_centroids_and_fsm(CHARA_TIME time_stamp,
+		float **data, int aoi_width, int aoi_height)
+{
+	int i,j,l,left,bottom,box_left, box_bottom, poke_sign;
+	float new_xc[NUM_LENSLETS];
+	float new_yc[NUM_LENSLETS];
+	float max;
+	float fluxes[NUM_LENSLETS];
+	float new_dm[NUM_ACTUATORS+1];
+	int x,y,dx,dy;
+	bool is_new_actuator=TRUE;
+	float outer_dm_mean = 0.0;
+	float x_mean_offset=0.0, y_mean_offset=0.0;
+	float max_offset=0.0;
+	float x_offset = 0.0, y_offset = 0.0, total_flux = 0.0;
+	float	xtilt = 0.0, ytilt = 0.0, focus = 0.0, a1 = 0.0, a2 = 0.0;
+	float	xpos = 0.0, ypos = 0.0;
+
+	/* First, compute the centroids. */
+
+	for (l = 0; l < NUM_LENSLETS; l++)
+	{
+		/* 
+ 		 * If we are doing "nonlinear" centroiding, 
+ 		 * we compute the centroid
+		 * only after finding the maximum pixel in a box.
+		 */
+
+		if (fsm_centroid_type == CENTROID_NONLINEAR)
+		{
+			box_left = (int)(rintf(x_centroid_offsets[l] -
+					CENTROID_BOX_WIDTH/2));
+			box_bottom = (int)(rintf(y_centroid_offsets[l] -
+					CENTROID_BOX_WIDTH/2));
+			max = 0;
+			left = CENTROID_BOX_WIDTH/2;
+			bottom = CENTROID_BOX_WIDTH/2;
+			for (i=0;i<CENTROID_BOX_WIDTH;i++)
+			for (j=0;j<CENTROID_BOX_WIDTH;j++)
+			{
+				if (data[box_left+i][box_bottom+j] > max)
+				{
+					max = data[box_left+i][box_bottom+j];
+					left = i;
+					bottom = j;
+				}
+			}
+			left += box_left - CENTROID_HW;
+			bottom += box_bottom - CENTROID_HW;
+		}
+		else
+		{
+			left = (int)(rintf(x_centroid_offsets[l]-CENTROID_HW));
+			bottom =(int)(rintf(y_centroid_offsets[l]-CENTROID_HW));
+		}
+
+		/* 
+ 		 * Now that we've defined our box, 
+ 		 * compute the weighted averages in each box
+ 		 */
+
+		fluxes[l]=0.0;
+		new_xc[l]=0.0;
+		new_yc[l]=0.0;
+		for (i=0;i<CENTROID_WINDOW_WIDTH;i++)
+		for (j=0;j<CENTROID_WINDOW_WIDTH;j++)
+		{
+			fluxes[l] += centroid_window[i][j] *
+					data[left+i][bottom+j];
+			new_xc[l] += centroid_xw[i][j] *
+					data[left+i][bottom+j];
+			new_yc[l] += centroid_yw[i][j] *
+					data[left+i][bottom+j];
+		}
+
+		/* Correct for low fluxes (denominator clamping) */
+
+		if (fluxes[l] < denom_clamp)
+		{
+			new_xc[l] /= denom_clamp;
+			new_yc[l] /= denom_clamp;
+		}
+		else
+		{
+			new_xc[l] /= fluxes[l];
+			new_yc[l] /= fluxes[l];
+		}
+
+		/* Correct for box offsets, including half-pixels */
+
+		new_xc[l] -= (x_centroid_offsets[l] -
+				(float)(left + CENTROID_HW));
+		new_yc[l] -= (y_centroid_offsets[l] - 
+				(float)(bottom + CENTROID_HW));
+
+		if (fluxes[l] < zero_clamp)
+		{
+			new_xc[l] = 0.0;
+			new_yc[l] = 0.0;
+		}
+	}
+
+	/* Reset the integral if needed */
+
+	if (fsm_cyclenum==0)
+	{
+		for (l=0;l<NUM_LENSLETS;l++)
+		{
+			fsm_xc_int[l]=0.0;
+			fsm_yc_int[l]=0.0;
+			avg_fluxes[l]=0.0;
+		}			
+	}
+
+	/* Compute the integral */
+
+	for (l=0;l<NUM_LENSLETS;l++)
+	{
+		fsm_xc_int[l]+=new_xc[l];
+		fsm_yc_int[l]+=new_yc[l];
+		avg_fluxes[l]+=fluxes[l];
+	}
+
+	/* Lock the mutex */
+
+	pthread_mutex_lock(&fsm_mutex);
+
+	/* Specialised code for different states...  */
+
+	switch (fsm_state)
+	{
+	case FSM_CENTROIDS_ONLY: fsm_cyclenum = 0;
+				 break;
+
+	case FSM_ZERO_CENTROIDS:
+	  	if (fsm_cyclenum == NUM_LABAO_ZERO_AVG)
+		{	
+		    get_usb_camera_aoi(&x,&y,&dx,&dy);
+		    for (l=0;l<NUM_LENSLETS;l++)
+		    {
+			x_centroid_offsets[l] += fsm_xc_int[l]/NUM_LABAO_ZERO_AVG;
+			y_centroid_offsets[l] += fsm_yc_int[l]/NUM_LABAO_ZERO_AVG;
+
+			/* Sanity check the numbers */
+
+			if (x_centroid_offsets[l] < CLEAR_EDGE)
+				x_centroid_offsets[l] = CLEAR_EDGE;
+			if (y_centroid_offsets[l] < CLEAR_EDGE)
+				y_centroid_offsets[l] = CLEAR_EDGE;
+			if (x_centroid_offsets[l] >= dx-CLEAR_EDGE)
+				x_centroid_offsets[l] = dx-CLEAR_EDGE;
+			if (y_centroid_offsets[l] >= dy-CLEAR_EDGE)
+				y_centroid_offsets[l] = dy-CLEAR_EDGE;
+		    }
+		    fsm_cyclenum=0;
+		    fsm_state = FSM_CENTROIDS_ONLY;
+	  	}
+	  	break;
+	  	
+	case FSM_MEASURE_RECONSTRUCTOR:
+		if (fsm_cyclenum == 0)
+		{
+		    for (i=0;i<NUM_ACTUATORS;i++)
+		    for (l=0;l<NUM_LENSLETS;l++)
+		    {
+		    	fsm_actuator_to_sensor[i][l] = 0.0;
+		    	fsm_actuator_to_sensor[i][NUM_LENSLETS + l] = 0.0;
+		    }
+	  	}
+	  	    
+		/* 
+		 * "actuator" starts at 1, incrementing every
+		 *  (NUM_RECON_WAIT + NUM_RECON_AVG)*NUM_RECON_CYCLES*2 cycles
+		 */
+		
+		actuator = 1 + fsm_cyclenum/(NUM_RECON_WAIT + NUM_RECON_AVG)/
+				NUM_RECON_CYCLES/2;
+		 
+		message(system_window,"Poking actuator %d", actuator);
+		send_labao_text_message("Poking actuator %d", actuator);
+
+		/* 
+		 * "poke_sign" starts at 1, changing sign every 
+		 *  NUM_RECON_WAIT + NUM_RECON_AVG cycles
+		 */
+
+		poke_sign = 1-2*( (fsm_cyclenum/(NUM_RECON_WAIT + 
+				NUM_RECON_AVG)) % 2 );
+		
+		/* To make the next code more readable is this a new actuator?*/
+		
+		is_new_actuator = 1 - 
+		  ( (fsm_cyclenum/(NUM_RECON_WAIT + NUM_RECON_AVG)/
+				NUM_RECON_CYCLES) % 2);
+		
+		/* 
+		 * We cycle through the actuators one by one, waiting 
+		 * NUM_RECON_WAIT after a move and averaging for NUM_RECON_AVG,
+		 * reversing the sign
+		 * NUM_RECON_CYCLES*2 times then moving on to the next actuator.
+		 */
+		
+		if (fsm_cyclenum % (NUM_RECON_WAIT + NUM_RECON_AVG) == 0)
+		{
+		    if (fsm_cyclenum > 0)
+		    {
+			/* Remove the previous poke */
+				if (is_new_actuator)
+					edac40_delta_single_channel(actuator-1,
+					poke_sign*ACTUATOR_POKE);
+				else
+					edac40_delta_single_channel(actuator,
+					poke_sign*ACTUATOR_POKE);
+		    }
+
+		    /* Poke the current actuator in the poke direction */
+
+		    if (actuator <= NUM_ACTUATORS) 
+				edac40_delta_single_channel(actuator,
+					poke_sign*ACTUATOR_POKE);
+		}
+
+		/* If we've finished, then finish up! */
+
+		if (fsm_cyclenum == 2*NUM_ACTUATORS*NUM_RECON_CYCLES *
+					(NUM_RECON_WAIT + NUM_RECON_AVG))
+		{
+		    for (i=0;i<NUM_ACTUATORS;i++)
+		    for (l=0;l<2*NUM_LENSLETS;l++) 
+			fsm_actuator_to_sensor[i][l] /=
+			(2*ACTUATOR_POKE*NUM_RECON_AVG*NUM_RECON_CYCLES);
+		    fsm_state = FSM_CENTROIDS_ONLY;
+		    fsm_cyclenum = 0;
+		    actuator = 1;
+		    werase(system_window);
+		    send_labao_text_message(
+			"Reonstructor measurment complete.");
+		} 
+
+		/* If we've finished waiting, integrate the sensor positions */ 
+
+		else if (fsm_cyclenum % (NUM_RECON_WAIT + NUM_RECON_AVG) >= 
+				NUM_RECON_WAIT) 
+		{
+		    for (l=0;l<NUM_LENSLETS;l++)
+		    {
+			fsm_actuator_to_sensor[actuator-1][l] += 
+				poke_sign*new_xc[l];
+			fsm_actuator_to_sensor[actuator-1][NUM_LENSLETS + l] +=
+				poke_sign*new_yc[l];
+		    }
+		}
+		break;
+	
+	case FSM_APPLY_RECON_ONCE: /* Run the servo loop once with gain=1.0 */
+		servo_gain = 1.0;
+
+	case FSM_SERVO_LOOP:
+		if (fsm_cyclenum == 0)
+		{
+		    for (i=0;i<NUM_ACTUATORS;i++) fsm_dm_offset[i]=0.0;
+		}
+		for (i=0;i<NUM_ACTUATORS;i++)
+		{
+		    /* 
+ 		     * The most likely wavefront is flat, 
+ 		     * so damp the DM position to flat
+ 		     */
+
+		    if (fsm_state ==  FSM_SERVO_LOOP)
+			fsm_dm_offset[i] *= servo_damping;
+
+			/* 
+ 			 * If needed, find the overall tilt. 
+ 			 * NB This requires that all 
+			 * lenslets are illuminated!
+			 * It probably needs to be a weighted average.
+			 */
+
+		    if (fsm_ignore_tilt)
+		    {
+			for (l=0;l<NUM_LENSLETS;l++)
+			{
+				xtilt += new_xc[l];
+				ytilt += new_xc[l];
+			}
+			xtilt /= NUM_LENSLETS;
+			ytilt /= NUM_LENSLETS;
+		    }
+
+		    /* Apply the reconstructor */
+
+		    for (l=0;l<NUM_LENSLETS;l++)
+		    {
+			fsm_dm_offset[i] -= 
+			    servo_gain*fsm_reconstructor[i][l]*(new_xc[l]
+				- xtilt);
+			fsm_dm_offset[i] -= 
+			    servo_gain*fsm_reconstructor[i][NUM_LENSLETS+l] *
+				(new_yc[l] - ytilt);
+		    }
+
+		    /* Average outer_actuators to enforce zero-piston */
+
+		    if (i >= NUM_INNER_ACTUATORS)
+			outer_dm_mean += fsm_dm_offset[i];
+		}
+
+#ifdef ENFORCE_ZERO_PISTON
+		/* Enforce zero-piston */
+
+		outer_dm_mean /= (NUM_ACTUATORS - NUM_INNER_ACTUATORS);
+		for (i=NUM_INNER_ACTUATORS;i<NUM_ACTUATORS;i++)
+			fsm_dm_offset[i] -= outer_dm_mean;
+#endif
+
+		/* Add in the flat wavefront. */
+
+		for (i=0;i<NUM_ACTUATORS;i++)
+		{
+		    new_dm[i+1] = fsm_flat_dm[i]+fsm_dm_offset[i];
+		    
+	            /* Limit positions to the range 0 to 1 */
+
+	            if (new_dm[i+1] > 1)
+		    {
+			if (fsm_state != FSM_APPLY_RECON_ONCE)
+			 	fsm_dm_offset[i] -= new_dm[i+1]-1;
+			new_dm[i+1] = 1.0;
+		    }
+
+		    if (new_dm[i+1] < 0) {
+			if (fsm_state != FSM_APPLY_RECON_ONCE)
+			 	fsm_dm_offset[i] -= new_dm[i+1];
+			new_dm[i+1] = 0.0;
+		    }
+		}
+
+		/* Send off the DM command! */
+
+#warning ADD A WAY OF CALCULATING A MEAN DM POSITION HERE FOR SETTING FLAT.
+		if (edac40_set_all_channels(new_dm))
+		{
+		       	message(system_window, 
+				"Problem controlling the DM! Stopping servo.");
+		       	send_labao_text_message( 
+				"Problem controlling the DM! Stopping servo.");
+			fsm_state = FSM_CENTROIDS_ONLY;
+		}
+		if (fsm_state == FSM_APPLY_RECON_ONCE)
+		{
+			fsm_state = FSM_CENTROIDS_ONLY;
+			fsm_cyclenum = 0;
+		}
+		break;
+
+		default: error(FATAL,
+			"We should never reach this point in the switch");
+	}
+
+	/* 
+ 	 * Done with fancy servoing etc. 
+ 	 * Save the centroids and fluxes to our globals
+ 	 */
+
+	for (l=0;l<NUM_LENSLETS;l++)
+	{
+		xc[l] = new_xc[l];
+		yc[l] = new_yc[l];
+		avg_fluxes[l] = fluxes[l] *
+				(1-FLUX_DAMPING) + FLUX_DAMPING*avg_fluxes[l];
+	}
+
+	/* OK, next cycle */
+
+	fsm_cyclenum++;
+
+	/* To compute WFS aberrations, we need the current pupil center. */
+
+	for (i=0;i<NUM_LENSLETS;i++)
+	{
+		x_mean_offset += x_centroid_offsets[i];
+		y_mean_offset += y_centroid_offsets[i];
+	}
+	x_mean_offset /= NUM_LENSLETS;
+	y_mean_offset /= NUM_LENSLETS;
+
+	/* Compute the tiptilt, focus and astigmatism terms */
+
+	for (i=0;i<NUM_LENSLETS;i++)
+	{
+		x_offset = x_centroid_offsets[i] - x_mean_offset;
+		y_offset = y_centroid_offsets[i] - y_mean_offset;
+
+		if (fabs(x_offset) > max_offset) max_offset = fabs(x_offset);
+		if (fabs(y_offset) > max_offset) max_offset = fabs(y_offset);
+
+		xtilt += xc[i];
+		ytilt += yc[i];
+
+		total_flux += avg_fluxes[i];
+
+		xpos += x_centroid_offsets[i] * avg_fluxes[i];
+		ypos += y_centroid_offsets[i] * avg_fluxes[i];
+
+		focus += (xc[i]*x_offset + yc[i]*y_offset);
+		a1 +=    (xc[i]*x_offset - yc[i]*y_offset);
+		a2 +=    (yc[i]*x_offset + xc[i]*y_offset);
+	}
+
+	/* This is the old method.... */
+
+	/*
+	xtilt /= (NUM_LENSLETS/ARCSEC_PER_PIX);
+	ytilt /= (NUM_LENSLETS/ARCSEC_PER_PIX);
+	focus /= (NUM_LENSLETS/ARCSEC_PER_PIX);
+	a1 /= (NUM_LENSLETS/ARCSEC_PER_PIX);
+	a2 /= (NUM_LENSLETS/ARCSEC_PER_PIX);
+	xpos /= (NUM_LENSLETS/ARCSEC_PER_PIX);
+	ypos /= (NUM_LENSLETS/ARCSEC_PER_PIX);
+	*/
+
+	/* We do it this way so the numbers are the same as for the WFS */
+
+	xtilt /= ((float)NUM_LENSLETS*((float)CENTROID_BOX_WIDTH/2.0));
+	ytilt /= ((float)NUM_LENSLETS*((float)CENTROID_BOX_WIDTH/2.0));
+	focus /= (float)NUM_LENSLETS;
+	a1 /= (float)NUM_LENSLETS;
+	a2 /= (float)NUM_LENSLETS;
+	if (total_flux > ZERO_CLAMP)
+	{
+		xpos /= total_flux;
+		ypos /= total_flux;
+	}
+	else
+	{
+		xpos = 0.0;
+		ypos = 0.0;
+	}
+
+	/* 
+	 * So that all terms are at least in units of "pixels" 
+	 * (i.e. max tilt per sub-aperture), we divide by the
+	 * radius of the pupil.
+	 */
+
+	focus /= max_offset;
+	a1 /= max_offset;
+	a2 /= max_offset;
+	xpos /= max_offset;
+	ypos /= max_offset;
+
+	/* Are we saving the aberrations for a report? */
+
+	if (aberrations_record_num > 0 &&
+	    aberrations_record_count < aberrations_record_num)
+	{
+		aberrations_record[aberrations_record_count].xtilt = xtilt;
+		aberrations_record[aberrations_record_count].ytilt = ytilt;
+		aberrations_record[aberrations_record_count].xpos = xpos;
+		aberrations_record[aberrations_record_count].ypos = ypos;
+		aberrations_record[aberrations_record_count].focus = focus;
+		aberrations_record[aberrations_record_count].a1 = a1;
+		aberrations_record[aberrations_record_count].a2 = a2;
+		aberrations_record[aberrations_record_count].fsm_state = 
+								fsm_state;
+		aberrations_record[aberrations_record_count].time_stamp = 
+								time_stamp;
+
+		aberrations_record_count++;
+	}
+
+	/* Now calculate the mean */
+
+	calc_labao_results.xtilt += xtilt;
+	calc_labao_results.ytilt += ytilt;
+	calc_labao_results.focus += focus;
+	calc_labao_results.xpos += xpos;
+	calc_labao_results.ypos += ypos;
+	calc_labao_results.a1 += a1;
+	calc_labao_results.a2 += a2;
+
+	if (++wfs_results_n >= wfs_results_num)
+	{
+		wfs_results.xtilt = calc_labao_results.xtilt/wfs_results_num;
+		wfs_results.ytilt = calc_labao_results.ytilt/wfs_results_num;
+		wfs_results.focus = calc_labao_results.focus/wfs_results_num;
+		wfs_results.xpos = calc_labao_results.xpos/wfs_results_num;
+		wfs_results.ypos = calc_labao_results.ypos/wfs_results_num;
+
+		if (set_center)
+		{
+			xpos_center = wfs_results.xpos;
+			ypos_center = wfs_results.ypos;
+			set_center = FALSE;
+		}
+
+		wfs_results.xpos -= xpos_center;
+		wfs_results.ypos -= ypos_center;
+		wfs_results.a1 = calc_labao_results.a1/wfs_results_num;
+		wfs_results.a2 = calc_labao_results.a2/wfs_results_num;
+
+		calc_labao_results.xtilt = 0.0;
+		calc_labao_results.ytilt = 0.0;
+		calc_labao_results.xpos = 0.0;
+		calc_labao_results.ypos = 0.0;
+		calc_labao_results.focus = 0.0;
+		calc_labao_results.a1 = 0.0;
+		calc_labao_results.a2 = 0.0;
+
+		wfs_results_n = 0;
+
+		new_aberrations = TRUE;
+	}
+
+	/* Unlock the Mutex */
+ 
+	pthread_mutex_unlock(&fsm_mutex);
+
+} /* run_centroids_and_fsm() */
+
+/************************************************************************/
+/* zero_centroids()							*/
+/*                                                                      */
+/* Change the FSM state to ZERO_CENTROIDS.                              */
+/************************************************************************/
+
+void zero_centroids(void)
+{
+	pthread_mutex_lock(&fsm_mutex);
+	fsm_cyclenum=0;
+	fsm_state = FSM_ZERO_CENTROIDS;
+	set_center = TRUE;
+	pthread_mutex_unlock(&fsm_mutex);
+}
+
+/************************************************************************/
+/* call_zero_centroids()                                                */
+/*                                                                      */
+/* The callback function for this.                                      */
+/************************************************************************/
+
+int call_zero_centroids(int argc, char **argv)
+{
+	zero_centroids();
+	return NOERROR;
+} 
+
+/************************************************************************/
+/* close_servo()							*/
+/*                                                                      */
+/* Change the FSM state to FSM_SERVO_LOOP.                              */
+/************************************************************************/
+
+void close_servo(void)
+{
+	pthread_mutex_lock(&fsm_mutex);
+	fsm_cyclenum=0;
+	fsm_state = FSM_SERVO_LOOP;
+	pthread_mutex_unlock(&fsm_mutex);
+}
+
+/************************************************************************/
+/* call_close_servo()                                                   */
+/*                                                                      */
+/* The callback function for this.                                      */
+/************************************************************************/
+
+int call_close_servo(int argc, char **argv)
+{
+	close_servo();
+	return NOERROR;
+} 
+
+/************************************************************************/
+/* open_servo() 							*/
+/*                                                                      */
+/* Change the FSM state to FSM_SERVO_LOOP.                              */
+/************************************************************************/
+
+void open_servo(void)
+{
+	pthread_mutex_lock(&fsm_mutex);
+	fsm_cyclenum=0;
+	fsm_state = FSM_CENTROIDS_ONLY;
+	pthread_mutex_unlock(&fsm_mutex);
+}
+
+/************************************************************************/
+/* call_open_servo()                                                    */
+/*                                                                      */
+/* The callback function for this.                                      */
+/************************************************************************/
+
+int call_open_servo(int argc, char **argv)
+{
+	open_servo();
+	return NOERROR;
+} 
+
+/************************************************************************/
+/* apply_reconstructor() 						*/
+/*                                                                      */
+/* Apply the reconstructor once.                                        */
+/************************************************************************/
+
+void apply_reconstructor(void)
+{
+	pthread_mutex_lock(&fsm_mutex);
+	fsm_cyclenum=0;
+	fsm_state = FSM_APPLY_RECON_ONCE;
+	pthread_mutex_unlock(&fsm_mutex);
+}
+
+/************************************************************************/
+/* call_apply_reconstructor()                                           */
+/*                                                                      */
+/* The callback function for this.                                      */
+/************************************************************************/
+
+int call_apply_reconstructor(int argc, char **argv)
+{
+	apply_reconstructor();
+	return NOERROR;
+} 
+
+/************************************************************************/
+/* measure_reconstructor()						*/
+/*									*/
+/* Change the FSM state to measure_reconstructor.			*/
+/************************************************************************/
+
+void measure_reconstructor(void)
+{
+	pthread_mutex_lock(&fsm_mutex);
+	fsm_cyclenum=0;
+	fsm_state = FSM_MEASURE_RECONSTRUCTOR;
+	pthread_mutex_unlock(&fsm_mutex);
+}
+
+/************************************************************************/
+/* call_measure_reconstructor()						*/
+/*									*/
+/* User callable version.						*/
+/************************************************************************/
+
+
+int call_measure_reconstructor(int argc, char **argv)
+{
+	measure_reconstructor();
+	return NOERROR;
+}
+
+/************************************************************************/
+/* fsm_status()						 		*/
+/*									*/
+/* Can be called as a background process.				*/
+/************************************************************************/
+
+int fsm_status(void)
+{
+	struct smessage mess;
+	struct s_aob_move_motor motor_move;
+	mirror_move mirror_move;
+	char	s[123];
+	static time_t  last_time = 0;
+	float	theta, x, y;
+
+	/* The overall state. */
+
+	wstandout(status_window);
+	mvwaddstr(status_window,3,20,"FSM  : ");
+	wstandend(status_window);
+	switch (fsm_state)
+	{
+		case FSM_CENTROIDS_ONLY:
+			wprintw(status_window, " WFS only     ");
+			break;
+		case FSM_ZERO_CENTROIDS:
+			wprintw(status_window,"Zero Centroids");
+			break;
+		case FSM_MEASURE_RECONSTRUCTOR:
+			wprintw(status_window, " Recon %2d  ", actuator);
+			break;
+		case FSM_SERVO_LOOP:
+			wprintw(status_window, " Servo Active ");
+			break;
+		default:
+			wprintw(status_window, "UNKNOWN");
+	}
+
+	wstandout(status_window);
+	mvwaddstr(status_window,4,20,"IntN : ");
+	wstandend(status_window);
+	wprintw(status_window, "%9d", wfs_results_num);
+
+	/* Is there a new mean we can work with? */
+
+	pthread_mutex_lock(&fsm_mutex);
+	if (new_aberrations && time(NULL) > last_time)
+	{
+		new_aberrations = FALSE;
+		last_time = time(NULL);
+
+		/* Let the user know about this */
+
+		mess.type = LABAO_WFS_RESULTS;
+		mess.length = sizeof(wfs_results);
+		mess.data = (unsigned char *)&wfs_results;
+		ui_send_message_all(&mess);
+
+		/* Are we trying to align things? */
+
+		if (autoalign_lab_dichroic)
+		{
+			/* Is it done? */
+
+			if (fabs(wfs_results.xtilt) < 0.01 &&
+			    fabs(wfs_results.ytilt) < 0.01)
+			{
+				autoalign_lab_dichroic = FALSE;
+				autoalign_count = 0;
+				message(system_window,
+					"Lab Autoalignment is complete.");
+				send_labao_text_message("%s", 
+					"Lab Autoalignment is complete.");
+				pthread_mutex_unlock(&fsm_mutex);
+				return NOERROR;
+			}
+
+			/* Have we tried too many times? */
+
+			if (--autoalign_count < 0)
+			{
+				autoalign_lab_dichroic = FALSE;
+				autoalign_count = 0;
+				message(system_window,
+					"Giving up on lab autoalignment.");
+				send_labao_text_message("%s",
+					"Giving up on lab autoalignment.");
+				pthread_mutex_unlock(&fsm_mutex);
+				return NOERROR;
+			}
+
+			/* OK, move things in appropriate ways */
+
+			mess.type = PICO_MOVE_MIRROR;
+			mess.length = sizeof(mirror_move);
+			mess.data = (unsigned char *)&mirror_move;
+			mirror_move.mirror = dich_mirror;
+			mirror_move.pulses = LAB_ALIGN_STEP;
+
+			sprintf(s, "%d X = %.2f Y = %.2f -", 
+			autoalign_count+1, 
+			wfs_results.xtilt, wfs_results.ytilt);
+
+			if (autoalign_count % 2)
+			{
+			    if (wfs_results.xtilt >= 0.01)
+			    {
+				mirror_move.direction = DOWN;
+				send_message(pico_server, &mess);
+				strcat(s," Moving DOWN");
+			    }
+			    else if (wfs_results.xtilt <= -0.01)
+			    {
+				mirror_move.direction = UP;
+				send_message(pico_server, &mess);
+				strcat(s," Moving UP");
+			    }
+			    else
+			    {
+				strcat(s, "X OK.");
+			    }
+			}
+			else
+			{
+			    if (wfs_results.ytilt >= 0.01)
+			    {
+				mirror_move.direction = RIGHT;
+				send_message(pico_server, &mess);
+				strcat(s," Moving RIGHT");
+			    }
+			    else if (wfs_results.ytilt <= -0.01)
+			    {
+				mirror_move.direction = LEFT;
+				send_message(pico_server, &mess);
+				strcat(s," Moving LEFT");
+			    }
+			    else
+			    {
+				strcat(s, "Y OK.");
+			    }
+			}
+			message(system_window,s);
+			send_labao_text_message("%s", s);
+		}
+
+		if (autoalign_scope_dichroic)
+		{
+			/* Is it done? */
+
+			if (fabs(wfs_results.xtilt) < 0.05 &&
+			    fabs(wfs_results.ytilt) < 0.05)
+			{
+				autoalign_scope_dichroic = FALSE;
+				autoalign_count = 0;
+				message(system_window,
+					"Scope Autoalignment is complete.");
+				send_labao_text_message("%s", 
+					"Scope Autoalignment is complete.");
+				pthread_mutex_unlock(&fsm_mutex);
+				return NOERROR;
+			}
+
+			/* Have we tried too many times? */
+
+			if (--autoalign_count < 0)
+			{
+				autoalign_lab_dichroic = FALSE;
+				autoalign_count = 0;
+				message(system_window,
+					"Giving up on scope autoalignment.");
+				send_labao_text_message("%s",
+					"Giving up on scope autoalignment.");
+				pthread_mutex_unlock(&fsm_mutex);
+				return NOERROR;
+			}
+
+			/* OK, move things in appropriate ways */
+
+			mess.type = HUT_AOB_MOVE_RELATIVE;
+			mess.length = sizeof(motor_move);
+			mess.data = (unsigned char *)&motor_move;
+
+			/* First we need to rotate into the right frame */
+
+			theta = (telescope_status.az + 8.0)/180.0*M_PI;
+			x = cos(theta) * wfs_results.xtilt -
+			    sin(theta) * wfs_results.ytilt;
+			y = sin(theta) * wfs_results.xtilt -
+			    cos(theta) * wfs_results.ytilt;
+
+			/* Tell the user */
+
+			sprintf(s, "%d X = %.2f/%.2f Y = %.2f/%.2f -", 
+			autoalign_count+1, 
+			wfs_results.xtilt, x, wfs_results.ytilt, y);
+			if (autoalign_count % 2)
+			{
+			    if (x > 0.05)
+			    {
+				motor_move.motor = AOB_DICHR_2;
+				motor_move.position = SCOPE_ALIGN_STEP;
+				send_message(telescope_server, &mess);
+				last_time++;
+				strcat(s," Moving RIGHT");
+			    }
+			    else if (x < -0.06)
+			    {
+				motor_move.motor = AOB_DICHR_2;
+				motor_move.position = -1.0*SCOPE_ALIGN_STEP;
+				send_message(telescope_server, &mess);
+				last_time++;
+				strcat(s," Moving LEFT");
+			    }
+			    else
+			    {
+				strcat(s, "X OK.");
+			    }
+			}
+			else
+			{
+			    if (y > 0.05)
+			    {
+				motor_move.motor = AOB_DICHR_1;
+				motor_move.position = SCOPE_ALIGN_STEP;
+				send_message(telescope_server, &mess);
+				last_time++;
+				strcat(s," Moving UP");
+			    }
+			    else if (y < -0.06)
+			    {
+				motor_move.motor = AOB_DICHR_1;
+				motor_move.position = -1.0*SCOPE_ALIGN_STEP;
+				send_message(telescope_server, &mess);
+				last_time++;
+				strcat(s," Moving DOWN");
+			    }
+			    else
+			    {
+				strcat(s, "Y OK.");
+			    }
+			}
+
+			message(system_window,s);
+			send_labao_text_message("%s", s);
+		}
+		/* Now output these variables to the status window */
+
+		wstandout(status_window);
+		mvwaddstr(status_window,5,20,"Tilt : ");
+		wstandend(status_window);
+		wprintw(status_window, "%6.3f %6.3f", 
+			wfs_results.xtilt, wfs_results.ytilt);
+		wstandout(status_window);
+		mvwaddstr(status_window,6,20,"Pos  : ");
+		wstandend(status_window);
+		wprintw(status_window, "%6.3f %6.3f", 
+			wfs_results.xpos, wfs_results.ypos);
+		wstandout(status_window);
+		mvwaddstr(status_window,7,20,"Focus: ");
+		wstandend(status_window);
+		wprintw(status_window, "%6.3f", wfs_results.focus);
+		wstandout(status_window);
+		mvwaddstr(status_window,8,20,"Astig: ");
+		wstandend(status_window);
+		wprintw(status_window, "%6.3f %6.3f", 
+			wfs_results.a1, wfs_results.a2);
+	}
+	pthread_mutex_unlock(&fsm_mutex);
+
+	return NOERROR;
+
+} /* fsm_status() */
+
+/************************************************************************/
+/* compute reconstructor()						*/
+/*									*/
+/* Compute the reconstructor using python, and save as the "working"    */
+/* reconstructor version.						*/
+/************************************************************************/
+
+int compute_reconstructor(int argc, char **argv)
+{
+	char command[256], in_filename[256], out_filename[256], s[256];
+
+	if (argc == 0)
+	{
+		sprintf(in_filename,"%s%s_actuator_to_sensor.tmp", 
+			get_data_directory(s), labao_name);
+		if (save_actuator_to_sensor(in_filename))
+		    return error(ERROR, 
+		    "Could not create temporary actuator_to_sensor file %s.",
+			in_filename);
+		sprintf(out_filename,"%s%s_reconstructor.tmp", 
+			get_data_directory(s), labao_name);
+	}
+
+#warning many more options needed here i.e. non-fixed filenames.
+#warning The data directory may not be ideal.
+
+	/* Run the code */
+
+	sprintf(command, "compute_reconstructor %s %s",
+			in_filename, out_filename);
+	if (system(command))
+		return error(ERROR,
+			"Failed to run python reconstructor computation.");
+
+	/* Load the reconstructor */
+
+	if (load_reconstructor(out_filename))
+		return error(ERROR,
+			"Problems loading the temporary reconstructor file.");
+
+	return NOERROR;	
+
+} /* compute_reconstructor() */
+
+/************************************************************************/
+/* save reconstructor()							*/
+/*									*/
+/* Save the temporary reconstructor file to the etc directory or	*/
+/* elsewhere 								*/
+/************************************************************************/
+
+int save_reconstructor(int argc, char **argv)
+{
+	char tmp_filename[256], etc_filename[256], command[256], s[256];
+
+	sprintf(tmp_filename, "%s%s_actuator_to_sensor.tmp",
+		get_data_directory(s), labao_name);
+	sprintf(etc_filename, "%s%s_actuator_to_sensor.dat",
+		get_etc_directory(s), labao_name);
+	sprintf(command, "cp %s %s", tmp_filename, etc_filename);
+	if (system(command))
+		return error(ERROR,
+		"Could not save actuator to sensor in the etc directory.");
+
+	sprintf(tmp_filename, "%s%s_reconstructor.tmp",
+		get_data_directory(s), labao_name);
+	sprintf(etc_filename, "%s%s_recon.dat",
+		get_etc_directory(s), labao_name);
+	sprintf(command, "cp %s %s", tmp_filename, etc_filename);
+	if (system(command))
+		return error(ERROR,
+		"Could not save reconstructor in the etc directory.");
+
+	return NOERROR;
+
+} /* save_reconstructor() */
+
+/************************************************************************/
+/* set_flat_dm()                                                        */
+/*                                                                      */
+/* Set the current DM shape as "flat"                                   */
+/************************************************************************/
+
+int set_flat_dm(void)
+{
+	int i;	
+
+	for (i=0;i<NUM_ACTUATORS;i++)
+		fsm_flat_dm[i]=edac40_current_value(i+1);
+
+	return NOERROR;
+
+} /* set_flat_dm() */
+
+/************************************************************************/
+/* call_set_flat_dm()                                                   */
+/*                                                                      */
+/* Set the current DM shape as "flat"                                   */
+/************************************************************************/
+
+int call_set_flat_dm(int argc, char **argv)
+{
+	set_flat_dm();
+
+	return NOERROR;
+
+} /* call_set_flat_dm() */
+
+/************************************************************************/
+/* flatten_wavefront()                                                  */
+/*                                                                      */
+/* Flatten the wavefront.                                               */
+/************************************************************************/
+
+int flatten_wavefront(void)
+{
+        int i;
+        float actuators_out[NUM_ACTUATORS+1];
+
+        for (i=0;i<NUM_ACTUATORS;i++) actuators_out[i+1]=fsm_flat_dm[i];
+
+        if (edac40_set_all_channels(actuators_out)) return -1;
+
+        return NOERROR;
+
+} /* flatten_wavefront() */
+
+
+/************************************************************************/
+/* call_flatten_wavefront()                                             */
+/*                                                                      */
+/* The callback function for this.                                      */
+/************************************************************************/
+
+int call_flatten_wavefront(int argc, char **argv)
+{
+	if (flatten_wavefront()) 
+		return error(ERROR, "Error flattening wavefront.");
+	return NOERROR;
+
+} /* call_flatten_wavefront */
+
+/************************************************************************/
+/* toggle_ignore_tilt()   	 		    			*/
+/*									*/
+/* User Callable: toggle ignoring tilt when applying the reconstructor	*/
+/************************************************************************/
+
+int toggle_ignore_tilt(int argc, char **argv)
+{
+	if (fsm_ignore_tilt)
+	{
+		fsm_ignore_tilt=FALSE;
+		message(system_window, 
+			"NOT ignoring WFS tilt when applying reconstructor.");
+		send_labao_text_message(
+			"NOT ignoring WFS tilt when applying reconstructor.");
+	}
+	else
+	{
+		fsm_ignore_tilt=TRUE;
+		message(system_window, 
+			"Ignoring WFS tilt when applying reconstructor.");
+		send_labao_text_message(
+			"Ignoring WFS tilt when applying reconstructor.");
+	}
+
+	return NOERROR;
+
+} /* toggle_ignore_tilt() */
+
+/************************************************************************/
+/* dump_dm_offset()							*/
+/*									*/
+/************************************************************************/
+
+int dump_dm_offset(int argc, char **argv)
+{
+	char tmp_filename[256], s[256];
+	FILE *dumpfile;
+	int i;
+	sprintf(tmp_filename, "%s%s_dm.tmp", get_data_directory(s), labao_name);
+	if ((dumpfile = fopen(tmp_filename,"w")) == NULL ) 
+		return error(ERROR, "Error opening file");
+	for (i=0;i<NUM_ACTUATORS;i++)
+		fprintf(dumpfile, "%6.3f\n", fsm_dm_offset[i]);
+	fclose(dumpfile);
+	return NOERROR;
+}
+
+/************************************************************************/
+/* dump_centroid_offsets()						*/
+/************************************************************************/
+
+int dump_centroid_offsets(int argc, char **argv)
+{
+	char tmp_filename[256], s[256];
+	FILE *dumpfile;
+	int i;
+	sprintf(tmp_filename, "%s%s_co.tmp", get_data_directory(s), labao_name);
+	if ((dumpfile = fopen(tmp_filename,"w")) == NULL ) 
+		return error(ERROR, "Error opening file");
+	for (i=0;i<NUM_LENSLETS;i++)
+		fprintf(dumpfile, "%6.3f\n", xc[i]);
+	for (i=0;i<NUM_LENSLETS;i++)
+		fprintf(dumpfile, "%6.3f\n", yc[i]);
+	fclose(dumpfile);
+	return NOERROR;
+}
+
+/************************************************************************/
+/* edit_wfs_results_num()						*/
+/*									*/
+/* Let's you change the bnumber over which results are averaged		*/
+/************************************************************************/
+
+int edit_wfs_results_num(int argc, char **argv)
+{
+        char    s[100];
+        int 	n;
+
+        /* Check out the command line */
+
+        if (argc > 1)
+        {
+                sscanf(argv[1],"%d",&n);
+        }
+        else
+        {
+                clean_command_line();
+                sprintf(s,"%9d", wfs_results_num);
+                if (quick_edit("Samples for integration",s,s,NULL,INTEGER)
+                   == KEY_ESC) return NOERROR;
+                sscanf(s,"%d",&n);
+        }
+
+	if (n > 0) wfs_results_num = n;
+
+	
+	send_labao_text_message("Sampels for integration = %d.", n);
+
+	return NOERROR;
+
+} /* edit_wfs_results_num() */
+
+/************************************************************************/
+/* start_autoalign_lab_dichroic()					*/
+/*									*/
+/* Starts the Dichroic Automated alignment routine.			*/
+/************************************************************************/
+
+int start_autoalign_lab_dichroic(int argc, char **argv)
+{
+        char    s[100];
+
+	if (autoalign_scope_dichroic)
+		return error(ERROR,"Busy aligning Scope Dichroic.");
+
+        /* Check out the command line */
+
+        if (argc > 1)
+        {
+                sscanf(argv[1],"%d",&autoalign_count);
+        }
+        else
+        {
+                clean_command_line();
+                sprintf(s,"%9d", DEFAULT_AUTOALIGN_COUNT);
+                if (quick_edit("Maximum number of steps",s,s,NULL,INTEGER)
+                   == KEY_ESC) return NOERROR;
+                sscanf(s,"%d",&autoalign_count);
+        }
+
+	message(system_window,"Lab autoalignment begins Trys = %d",
+		autoalign_count);
+
+	autoalign_lab_dichroic = TRUE;
+
+	return NOERROR;
+
+} /* start_autoalign_lab_dichroic() */
+
+/************************************************************************/
+/* start_autoalign_scope_dichroic()					*/
+/*									*/
+/* Starts the Dichroic Automated alignment routine.			*/
+/************************************************************************/
+
+int start_autoalign_scope_dichroic(int argc, char **argv)
+{
+        char    s[100];
+
+	if (autoalign_lab_dichroic)
+		return error(ERROR,"Busy aligning Lab Dichroic.");
+
+	if (telescope_server < 0)
+		return error(ERROR,"Not talking to telescope server.");
+
+        /* Check out the command line */
+
+        if (argc > 1)
+        {
+                sscanf(argv[1],"%d",&autoalign_count);
+        }
+        else
+        {
+                clean_command_line();
+                sprintf(s,"%9d", DEFAULT_AUTOALIGN_COUNT);
+                if (quick_edit("Maximum number of steps",s,s,NULL,INTEGER)
+                   == KEY_ESC) return NOERROR;
+                sscanf(s,"%d",&autoalign_count); } 
+	message(system_window,"Scope autoalignment begins Trys = %d",
+		autoalign_count);
+
+	autoalign_scope_dichroic = TRUE;
+
+	return NOERROR;
+
+} /* start_autoalign_scope_dichroic() */
+
+/************************************************************************/
+/* stop_autoalign_dichroic()						*/
+/*									*/
+/* Stops the Dichroic Automated alignment routine.			*/
+/************************************************************************/
+
+int stop_autoalign_dichroic(int argc, char **argv)
+{
+	autoalign_lab_dichroic = FALSE;
+	autoalign_scope_dichroic = FALSE;
+
+	return NOERROR;
+
+} /* stop_autoalign_dichroic() */
+
+/************************************************************************/
+/* edit_servo_parameters()						*/
+/*									*/
+/* Edit gain and damping of servo.					*/
+/************************************************************************/
+
+int edit_servo_parameters(int argc, char **argv)
+{
+        char    s[100]; float	gain, damping;
+
+        /* Check out the command line */
+
+        if (argc > 1)
+        {
+                sscanf(argv[1],"%f",&gain);
+        }
+        else
+        {
+                clean_command_line();
+                sprintf(s,"%9.2f", servo_gain);
+                if (quick_edit("Servo Gain",s,s,NULL,FLOAT)
+                   == KEY_ESC) return NOERROR;
+                sscanf(s,"%f",&gain);
+        }
+
+	if (gain < 0.0 || gain > 1.0) return 
+		error(ERROR,"Gain must be between 0 and 1.");
+
+        if (argc > 2)
+        {
+                sscanf(argv[2],"%f",&damping);
+        }
+        else
+        {
+                clean_command_line();
+                sprintf(s,"%9.2f", servo_damping);
+                if (quick_edit("Servo Damping",s,s,NULL,FLOAT)
+                   == KEY_ESC) return NOERROR;
+                sscanf(s,"%f",&damping);
+        }
+
+	if (damping < 0.0 || damping > 1.0) return 
+		error(ERROR,"Damping must be between 0 and 1.");
+
+	servo_gain = gain;
+	servo_damping = damping;
+
+	return NOERROR;
+
+} /* edit_servo_parameters() */
+
+/************************************************************************/
+/* move_boxes()								*/
+/*									*/
+/* Move centroid boxes by a small amount.				*/
+/************************************************************************/
+
+int move_boxes(int argc, char **argv)
+{
+        char    s[100];
+	float	dx, dy;
+	int	i;
+
+        /* Check out the command line */
+
+        if (argc > 1)
+        {
+                sscanf(argv[1],"%f",&dx);
+        }
+        else
+        {
+                clean_command_line();
+                sprintf(s,"%9.2f", 0.1);
+                if (quick_edit("dX",s,s,NULL,FLOAT)
+                   == KEY_ESC) return NOERROR;
+                sscanf(s,"%f",&dx);
+        }
+
+        if (argc > 2)
+        {
+                sscanf(argv[2],"%f",&dy);
+        }
+        else
+        {
+                clean_command_line();
+                sprintf(s,"%9.2f", 0.1);
+                if (quick_edit("dY",s,s,NULL,FLOAT)
+                   == KEY_ESC) return NOERROR;
+                sscanf(s,"%f",&dy);
+        }
+
+  	for (i=0;i<NUM_LENSLETS;i++)
+	{
+		x_centroid_offsets[i] += dx;
+		y_centroid_offsets[i] += dy;
+	}
+
+	return NOERROR;
+
+} /* move_boxes() */
+
+/************************************************************************/
+/* edit_zero_clamp()							*/
+/*									*/
+/* Change value of zero clamp.						*/
+/************************************************************************/
+
+int edit_zero_clamp(int argc, char **argv)
+{
+        char    s[100];
+	float	new_clamp;
+
+        /* Check out the command line */
+
+        if (argc > 1)
+        {
+                sscanf(argv[1],"%f",&new_clamp);
+        }
+        else
+        {
+                clean_command_line();
+                sprintf(s,"%9.2f", zero_clamp);
+                if (quick_edit("Zero clamp",s,s,NULL,FLOAT)
+                   == KEY_ESC) return NOERROR;
+                sscanf(s,"%f",&new_clamp);
+        }
+
+	if (new_clamp < 0.0) return error(ERROR,
+		"Zero clamp must be >= 0.0");
+
+	zero_clamp = new_clamp;
+
+	return NOERROR;
+
+} /* edit_zero_clamp() */
+
+/************************************************************************/
+/* edit_denom_clamp()							*/
+/*									*/
+/* Change value of denom clamp.						*/
+/************************************************************************/
+
+int edit_denom_clamp(int argc, char **argv)
+{
+        char    s[100];
+	float	new_clamp;
+
+        /* Check out the command line */
+
+        if (argc > 1)
+        {
+                sscanf(argv[1],"%f",&new_clamp);
+        }
+        else
+        {
+                clean_command_line();
+                sprintf(s,"%9.2f", denom_clamp);
+                if (quick_edit("Denom clamp",s,s,NULL,FLOAT)
+                   == KEY_ESC) return NOERROR;
+                sscanf(s,"%f",&new_clamp);
+        }
+
+	if (new_clamp < 0.0) return error(ERROR,
+		"Zero clamp must be >= 0.0");
+
+	denom_clamp = new_clamp;
+
+	return NOERROR;
+
+} /* edit_denom_clamp() */
+
+/************************************************************************/
+/* message_labao_save_aberrations()					*/
+/*									*/
+/* Allocate memory, setup globals for recording aberrations data.	*/
+/************************************************************************/
+
+int message_labao_save_aberrations(struct smessage *mess)
+{
+	int	num = 0;
+
+        if (mess->length != sizeof(int))
+        {
+                return error(ERROR,
+                "Wrong number of bytes in LABAO_SETUP_ABERRATIONS_RECORD.");
+        }
+
+	/* Are we already recording data? */
+
+	if (aberrations_record_num != 0)
+	{
+		send_labao_text_message(
+		"We are already recording aberrations data.");
+		return NOERROR;
+	}
+
+	num = *((int *)mess->data);
+
+	if (num <= 0) return NOERROR;
+	if (num > MAX_ABERRATIONS_RECORD) num = MAX_ABERRATIONS_RECORD;
+
+	pthread_mutex_lock(&fsm_mutex);
+	aberrations_record_count = 0;
+	aberrations_record_num = num;
+	pthread_mutex_unlock(&fsm_mutex);
+
+	send_labao_text_message(
+		"Trying to save %d aberration measurements", num);
+	message(system_window,  
+		"Trying to save %d aberration measurements", num);
+
+	return NOERROR;
+
+}  /* message_labao_save_aberrations() */
+
+/************************************************************************/
+/* complete_aberrations_record()					*/
+/*									*/
+/* Should be called periodically to see if there is a complete set	*/
+/* of aberrations data recorded we need to save.			*/
+/************************************************************************/
+
+void complete_aberrations_record(void)
+{
+	int	year, month, day;
+	char	filename[345];
+	char	s[345];
+	FILE	*fp;
+	time_t	now;
+	struct tm *gmt_now;
+	int	i;
+
+	/* Have we finished? */
+
+	pthread_mutex_lock(&fsm_mutex);
+	if (aberrations_record_num == 0 ||
+	    aberrations_record_count < aberrations_record_num)
+	{
+		pthread_mutex_unlock(&fsm_mutex);
+		return;
+	}
+	pthread_mutex_unlock(&fsm_mutex);
+
+	/* We have data, let's find a good filename */
+
+	time(&now);
+	gmt_now = gmtime(&now);
+	year = gmt_now->tm_year + 1900;
+	month = gmt_now->tm_mon+1;
+	day = gmt_now->tm_mday;
+	
+	if (year < 1950) year+=100; /* Y2K.... */
+
+	for(i=1; i<1000; i++)
+	{
+		sprintf(filename,"%s/%4d_%02d_%02d_%s_aberrations_%03d.dat",
+			get_data_directory(s), year, month, day, labao_name, i);
+
+		if ((fp = fopen(filename, "r")) == NULL) break;
+		fclose(fp);
+	}
+
+	if (i > 999) 
+	{
+		error(ERROR,"Too many aberrations files.");
+		return;
+	}
+
+	/* OK, save the data */
+
+	if ((fp = fopen(filename, "w")) == NULL)
+	{
+		error(ERROR, "Failed to open file %s", filename );
+		return;
+	}
+
+	fprintf(fp,"# FILENAME        : %s\n",filename);
+	fprintf(fp,"# GMT YEAR        : %d\n",year);
+	fprintf(fp,"# GMT MONTH       : %d\n",month);
+	fprintf(fp,"# GMT DAY         : %d\n",day);
+	fprintf(fp,"# FSM STATE       : %d\n",aberrations_record[0].fsm_state);
+	fprintf(fp,
+	"# Time     Tilt X  Tilt Y   Pos X   Pos Y   Focus    A1      A2\n");
+	
+	for(i=0; i< aberrations_record_num; i++)
+		fprintf(fp, "%9d %7.4f %7.4f %7.4f %7.4f %7.4f %7.4f %7.4f\n",
+			aberrations_record[i].time_stamp,			
+			aberrations_record[i].xtilt,			
+			aberrations_record[i].ytilt,			
+			aberrations_record[i].xpos, 
+			aberrations_record[i].ypos,
+			aberrations_record[i].focus,
+			aberrations_record[i].a1,
+			aberrations_record[i].a2);
+
+	fclose(fp);
+	pthread_mutex_lock(&fsm_mutex);
+	aberrations_record_num = 0;
+	aberrations_record_count = 0;
+	pthread_mutex_unlock(&fsm_mutex);
+
+	send_labao_text_message("Saved file %s", filename);
+	message(system_window,  "Saved file %s", filename);
+
+} /* complete_aberrations_record() */

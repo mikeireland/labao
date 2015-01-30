@@ -1,0 +1,15 @@
+#!/bin/bash
+#
+# Script to run make using the Makefile for this kernel
+#
+if (test $# -eq 0) then
+        echo There should at least be one argument......
+else
+
+if [ `hostname` = labao.chara-array.org ]; then
+	make -f ./Makefile.labao $1
+else
+	make -f ./Makefile.other $1
+fi
+
+fi

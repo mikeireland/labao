@@ -1,0 +1,13 @@
+#!/bin/sh
+#
+# Script to start up wobble_mirror
+#
+if (test $# -lt 1) then
+	echo usage: run_labao {flags} name {display}
+	/usr/local/bin/labao
+else
+	export TERMINFO=
+	cd /usr/local/bin
+	sync
+	./labao $1 $2 $3 $4
+fi

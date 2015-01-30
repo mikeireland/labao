@@ -1,0 +1,63 @@
+2014_04_01
+
+> Redefine the spot positions for ‘flat'
+
+Type “zc” for Zero Centroids.
+
+> - Measure and calculate a reconstructor
+
+Measure: type “measure” when looking at the beacon, in open loop but with the centroids near-ish to the centers of the boxes.
+
+Compute: type “recon” but I’m not entirely sure this works and I have to test it. Better, you can:
+
+“saveint” to save the interaction matrix, then
+
+compute_reconstructor INFILE OUTFILE
+
+(compute_reconstructor us a python script installed in /usr/local/bin )
+
+> - find the 'default' positions for a good wavefront.
+> - Close the loop
+
+
+Type “close”, then “setflat”. To save this to file, type “savedef”.
+
+-----
+Dr Michael IRELAND
+
+2014_07_21
+----------
+
+Using PICO 1 and DICH-S2 step size of about 40 seems goog.
+
+UP increases X 
+DOWN decreases X
+LEFT increases Y
+RIGHT decreases Y
+
+0.01 seems a goo maximum offset.
+
+2014_10_01
+----------
+
+Testing Version 4.0 of the code. Still 
+
+Z5 increases A2 decreases 0.005 -> 0.06
+Z6 Increases A1 Increases 0.005 -> 0.06 But varries a lot
+Foc Increases Focus Decreases 0.005 -> 0.1
+
+Will save some aberration data to see what the varriation might be,
+
+Saved both aberration and frame data.
+
+Second aberration file will contain some changes.
+
+ALl this is with the Retro mirror and the centroids have been set for that.
+We will now try the corner cube.
+
+Aberrations 001 - On flat mirror with flat.
+002 - On flat mirror things changing.
+003 On corner cube with flat defined by mirror.
+004 on corner cube with flat defined by corner cube.
+005 On corner cube with all defaults.
+006 Same, software test

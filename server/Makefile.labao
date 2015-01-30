@@ -1,0 +1,105 @@
+########################################################################
+# Makefile                                                             #
+#                                                                      #
+# For labao system.   					   	       #
+#                                                                      #
+########################################################################
+#                                                                      #
+#		THE CHARA ARRAY					       #
+#     Center for High Angular Resolution Astronomy                     #
+# Georgia State University, Atlanta GA 30303-3083, U.S.A.              #
+#                                                                      #
+#                                                                      #
+# Telephone: 1-626-796-5405                                            #
+# Fax      : 1-626-796-6717                                            #
+# email    : theo@chara.gsu.edu                                        #
+# WWW      : http:www.chara.gsu.edu 		                       #
+#                                                                      #
+# (C) This source code and its associated executable                   #
+# program(s) are copyright.                                            #
+#                                                                      #
+########################################################################
+#                                                                      #
+# Author : Theo ten Brummelaar                                         #
+# Date   : Feb 2014      					       #
+########################################################################
+
+#
+# Some definitions
+#
+
+CC = gcc
+KCC = kgcc
+#LCFLAGS = -g -O2 -Wall -DUSE_RT
+#LCFLAGS = -g -Wall -DUSE_RT
+LFLAGS = -lueye_api -lzernike -ledac40 -lastroui -lastromod -lclockui -lcharaui -lchara -lcfitsio -lncurses -lnsimpleX -lX11 -lsla -lnrc -luipico -luiclient -lsockman -lclient -lrwfits -lnrc -pthread -lm -lz 
+MODDIR = /usr/local/modules
+LIBDIR = /usr/local/lib
+INCDIR = /usr/local/include
+HELPDIR = /usr/local/lib/ui_help
+BINDIR = /usr/local/bin
+ETCDIR = /ctrscrut/chara/etc
+#
+# The targets
+#
+
+all: labao 
+
+#
+# The application target. This is to run in straight linux
+#
+
+OFILES = labao.o\
+	 labao_background.o\
+	 labao_functs.o\
+	 labao_messages.o\
+	 labao_edac40.o\
+	 labao_zernike.o\
+	 labao_usb_camera.o\
+	 labao_fsm.o
+
+.c.o:
+	${CC} -c ${LCFLAGS} $<
+
+#
+# The user interface
+#
+
+$(OFILES): labao.h
+
+labao: $(OFILES) labao.h
+	${CC} -o labao $(OFILES) $(LFLAGS)
+
+#
+# Cleanup
+#
+
+clean:
+	rm -f core *~ $(OFILES) labao zernike_test.dat
+
+#
+# install
+#
+
+install: labao labao_help.ini labao_menus.ini run_labao 
+	cp labao $(BINDIR)/labao
+	chmod a+rx $(BINDIR)/labao
+	cp run_labao $(BINDIR)/run_labao
+	chmod a+rx $(BINDIR)/run_labao 
+	cp labao_help.ini $(BINDIR)/labao_help.ini
+	chmod a+r $(BINDIR)/labao_help.ini
+	cp labao_menus.ini $(BINDIR)/labao_menus.ini
+	chmod a+r $(BINDIR)/labao_menus.ini
+	#cp LABAO_S2_recon.dat $(ETCDIR)/LABAO_S2_recon.dat
+	#chmod a+r $(ETCDIR)/LABAO_S2_recon.dat
+	cp compute_reconstructor $(BINDIR)/compute_reconstructor
+	chmod a+rx $(BINDIR)/compute_reconstructor
+	#cp LABAO_S2.dat $(ETCDIR)/LABAO_S2.dat
+	#chmod a+r $(ETCDIR)/LABAO_S2.dat
+
+uninstall:
+	rm -f $(BINDIR)/labao
+	rm -f $(BINDIR)/run_labao
+	rm -f $(BINDIR)/labao_help.ini
+	rm -f $(BINDIR)/labao_menus.ini
+	rm -f $(BINDIR)/compute_reconstructor

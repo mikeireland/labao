@@ -1,0 +1,113 @@
+#!/usr/bin/env python 
+# To run, try:
+# compute_reconstructor LABAO_S2_actuator_to_sensor.dat LABAO_S2_recon.dat
+
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.cm as cm
+import sys
+
+if (len(sys.argv) < 3):
+	print "Useage: make_reconstructor [infile] [outfile] [num_modes (negative to include tip/tilt)] [autocol]"
+	raise UserWarning
+
+infile = sys.argv[1] #'LABAO_S2_actuator_to_sensor.dat'
+outfile = sys.argv[2] #'LABAO_S2_reconstructor.dat'
+
+if len(sys.argv) > 3:
+	num_modes = int(sys.argv[3])
+else:
+	num_modes = 7
+
+autocol = False
+if len(sys.argv) > 4:
+	if sys.argv[4]=='1':
+		autocol = True
+
+#... the following lines below were from before num_modes was implemented.
+# This exceeds the DM range when applied, and has 35 modes. Unstable at 400Hz, gain 0.5
+#UNSENSED_THRESHOLD = 0.08
+# This just reaches the DM range when applied, and has 17 modes. Stable at 100Hz, gain 0.5.
+# Should be totally fine with tilt. 
+#UNSENSED_THRESHOLD = 1.0 
+#This stays a long way from the DM range when applied (max 0.92 for mean 0.77), and has 10 modes.
+UNSENSED_THRESHOLD = 2.1 
+
+#The dodgy symbols below match some IDL code... 
+interaction_matrix = np.loadtxt(infile)
+#Optionally remove the tilt terms. 
+if num_modes>0:
+	nl = interaction_matrix.shape[1]/2
+	for i in range(interaction_matrix.shape[0]):
+		interaction_matrix[i,0:nl] -= np.mean(interaction_matrix[i,0:nl])
+		interaction_matrix[i,nl:2*nl] -= np.mean(interaction_matrix[i,nl:2*nl])
+if autocol:
+	interaction_matrix /= 2
+
+
+#Possibly add manual piston regularization here!
+#Just add a column to the matrix that represents a "fake" piston sensor, i.e. one
+#that is sensitive to only the outer ring of actuators. The problem is that this isn't 
+#really piston... 
+
+#Create an N_ACTUATORS by N_ACTUATORS matrix. The eigenvalues of this matrix represents
+#the total squared WFS influence of each DM mode. Piston would have an eigenvector of 0.
+c = np.dot(interaction_matrix,np.transpose(interaction_matrix))
+
+#The following line was needed in IDL to make sure C really was symmetric at the 
+#without rounding errorsn.
+#c = 0.5*(c + np.transpose(c))
+
+#Find the eigenvectors.
+eval,u = np.linalg.eig(c)
+
+#Remove completely any very  and 
+#lower the gain on poorly sensed modes.
+median_eval = np.median(abs(eval))
+eval_sorted = np.sort(eval)[::-1]
+if num_modes >= len(eval):
+	num_modes = len(eval)-1
+if (num_modes > 0):
+	UNSENSED_THRESHOLD = eval_sorted[np.where(np.abs(eval_sorted) > np.abs(eval_sorted[num_modes]))[0][-1]]
+	UNSENSED_THRESHOLD /= median_eval
+
+print UNSENSED_THRESHOLD
+
+w = np.where(np.abs(eval) < UNSENSED_THRESHOLD*median_eval)
+
+plt.semilogy(eval_sorted,'o')
+plt.semilogy(np.ones(len(eval))*UNSENSED_THRESHOLD*median_eval)
+plt.semilogy(np.ones(len(eval))*2*UNSENSED_THRESHOLD*median_eval)
+plt.semilogy(np.sort(eval)[0:num_modes:-1],'o')
+plt.xlabel('Sorted Eigenmode Number')
+plt.ylabel('Eigenvalue')
+plt.title('Close window to see next plot...')
+plt.show()
+
+plt.plot(u[:,0])
+plt.plot(u[:,1])
+plt.plot(u[:,2])
+plt.title('First 3 modes (close window to continue)')
+plt.show()
+
+eval[w] = median_eval*1e3
+w = np.where(np.abs(eval) < 2*UNSENSED_THRESHOLD*median_eval)
+eval[w] = 2*UNSENSED_THRESHOLD*median_eval
+
+d = np.diag(1.0/eval)
+
+c_regularized_inverse = np.dot(u,np.dot(d,np.transpose(u)))
+
+reconstructor = np.dot(c_regularized_inverse,interaction_matrix)
+ 
+m = np.dot(reconstructor,np.transpose(interaction_matrix))
+plt.imshow(m,cmap=cm.gray, interpolation='nearest')
+plt.title("Reconstructor . Interaction Matrix (max= {0:6.3f})".format(np.max(m)))
+plt.show()
+
+#m = np.dot(np.transpose(reconstructor),interaction_matrix)
+#plt.imshow(m,cmap=cm.gray, interpolation='nearest')
+#plt.title("Interaction Matrix . Reconstructor (max = {0:6.3f})".format(np.max(m)))
+#plt.show()
+ 
+np.savetxt(outfile,reconstructor, fmt='%6.3f ')
