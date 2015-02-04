@@ -76,6 +76,8 @@ struct {
 		{"testzern",	test_set_all_zernike},
 		{"reszern",	reset_all_zernike},
 		{"zzern",	reset_all_zernike},
+		{"szern",	call_save_zernike},
+		{"lzern",	call_load_zernike},
 
 		/* Function set for USB camera */
 

@@ -200,6 +200,10 @@ int call_increment_zernike(int argc, char **argv);
 int call_set_zernike(int argc, char **argv);
 int test_set_all_zernike(int argc, char **argv);
 int reset_all_zernike(int argc, char **argv);
+int save_zernike(char* filename_in);
+int call_save_zernike(int argc, char **argv);
+int load_zernike(char* filename_in);
+int call_load_zernike(int argc, char **argv);
 
 /* labao_usb_camera.c */
 

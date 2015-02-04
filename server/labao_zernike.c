@@ -468,3 +468,147 @@ int reset_all_zernike(int argc, char **argv)
 	return NOERROR;
 
 } /* test_set_all_zernike() */
+
+/************************************************************************/
+/* save_zernike()							*/
+/*									*/
+/* Saves current set of Zernikes to a file.				*/
+/************************************************************************/
+
+int save_zernike(char* filename_in)
+{
+        char filename[256], s[256];
+	FILE	*fp;
+	int	j;
+
+        if (filename_in != NULL)
+        {
+                sprintf(filename,"%s%s", get_etc_directory(s), filename_in);
+        }
+        else
+        {
+                sprintf(filename,"%s%s.zern", get_etc_directory(s), labao_name);
+        }
+
+	if ((fp = fopen(filename,"w")) == NULL)
+	{
+		return ERROR;
+	}
+
+	fprintf(fp,"# Zernike values for %s\n", labao_name);
+
+	for(j=1; j <= maxJ; j++) fprintf(fp,"%.5f\n",zernike_values[j]);
+
+	fclose(fp);
+
+	message(system_window,  "Zernike modes succesfully saved!");
+        send_labao_text_message("Zernike modes succesfully saved!");
+
+	return NOERROR;
+
+} /* save_zernike() */
+
+/************************************************************************/
+/* call_save_zernike()							*/
+/*									*/
+/* User callable version.						*/
+/************************************************************************/
+
+int call_save_zernike(int argc, char **argv)
+{
+	int	ret; 
+
+	if (argc > 1)
+		ret = save_zernike(argv[1]);
+	else
+		ret = save_zernike(NULL);
+
+	if (ret != NOERROR)
+		return error(ERROR,"Failed to save Zenrike file.");
+
+	return NOERROR;
+
+} /* call_save_zernike() */
+
+/************************************************************************/
+/* load_zernike()							*/
+/*									*/
+/* Saves current set of Zernikes to a file.				*/
+/************************************************************************/
+
+int load_zernike(char* filename_in)
+{
+        char filename[256], s[256];
+	FILE	*fp;
+	int	j;
+
+        if (filename_in != NULL)
+        {
+                sprintf(filename,"%s%s", get_etc_directory(s), filename_in);
+        }
+        else
+        {
+                sprintf(filename,"%s%s.zern", get_etc_directory(s), labao_name);
+        }
+
+	if ((fp = fopen(filename,"r")) == NULL)
+	{
+		return -1;
+	}
+
+	for(j=1; j <= maxJ; j++) zernike_values[j] = 0.0;
+
+	for(j=1; j <= maxJ; j++)
+	{
+		if (GetDataLine(s, 256, fp) == -1)
+		{
+			fclose(fp);
+			return -2;	
+		}
+		if (sscanf(s,"%f",zernike_values+j) != 1) 
+			return -3;
+
+	}
+
+	fclose(fp);
+
+	message(system_window,  "Zernike modes succesfully loaded!");
+        send_labao_text_message("Zernike modes succesfully loaded!");
+
+	return NOERROR;
+
+} /* load_zernike() */
+
+/************************************************************************/
+/* call_load_zernike()							*/
+/*									*/
+/* User callable version.						*/
+/************************************************************************/
+
+int call_load_zernike(int argc, char **argv)
+{
+	int	ret; 
+
+	if (argc > 1)
+		ret = load_zernike(argv[1]);
+	else
+		ret = load_zernike(NULL);
+
+	if (ret != 0)
+	{
+		if (ret == -1)
+		    return error(ERROR,"Failed to open Zenrike file.");
+		else if (ret == -2)
+		    return error(ERROR,"Failed to read all Zernike terms.");
+		else
+		    return error(ERROR,"Unknown error reading Zernike modes.");
+	}
+
+	if (set_all_zernike(zernike_values) != 0)
+	{
+		return error(ERROR,"Failed to set zernike values.");
+	}
+
+	return NOERROR;
+
+} /* call_load_zernike() */

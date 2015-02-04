@@ -12,6 +12,7 @@
 /* 3.0 - Changed aberration calculations to match the WFS.		*/
 /* 4.0 - Aberration calculations in RT thread. Can save data.		*/
 /* 4.1 - Some small corrections after testing 2014_10_01		*/
+/* 4.2 - Added offsets for reference beam focus etc. 2015 02 02		*/
 /************************************************************************/
 /*                                                                      */
 /*                    CHARA ARRAY USER INTERFACE			*/
@@ -141,7 +142,7 @@ int main(int argc, char **argv)
 	ui_clear_screen();
 	put_line("");
 
-	sprintf(title,"%s 4.1",labao_name);
+	sprintf(title,"%s 4.2",labao_name);
 	center_line(title);
 	put_line("");
 	center_line("The CHARA Array");

@@ -50,7 +50,7 @@
 #define CENTROID_HW (CENTROID_WINDOW_WIDTH/2)
 #define CLEAR_EDGE ((CENTROID_BOX_WIDTH/2) + (CENTROID_WINDOW_WIDTH/2))
 #warning WE NEED TO THINK ABOUT THESE NUMBERS
-#define ZERO_CLAMP 20
+#define ZERO_CLAMP 15
 #define DENOM_CLAMP 30
 #define FLUX_DAMPING 0.9
 
@@ -1515,6 +1515,7 @@ int fsm_status(void)
 					"Lab Autoalignment is complete.");
 				send_labao_text_message("%s", 
 					"Lab Autoalignment is complete.");
+				use_reference = FALSE;
 				pthread_mutex_unlock(&fsm_mutex);
 				return NOERROR;
 			}
@@ -2014,7 +2015,18 @@ int start_autoalign_lab_dichroic(int argc, char **argv)
 	message(system_window,"Lab autoalignment begins Trys = %d",
 		autoalign_count);
 
+	/* The servo must not be on. */
+
+	open_servo();
+
+#warning Do we need to add shutter things here? 
+
+	/* We need the reference offsets */
+
 	use_reference = TRUE;
+
+	/* Go */
+
 	autoalign_lab_dichroic = TRUE;
 
 	return NOERROR;
