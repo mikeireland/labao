@@ -1,4 +1,3 @@
-#warning We need a way to send single line messages to this client.
 /************************************************************************/
 /* labaogtk.c                                                           */
 /*                                                                      */
@@ -63,11 +62,18 @@ static char	host[256];
 static int	port = 0;
 static char	skip_socket_manager = FALSE;
 static struct astro_init_window_data init_info;
-static GtkWidget *tilt_label;
+static GtkWidget *tilt_x_label;
+static GtkWidget *tilt_y_label;
+#ifdef SHOW_POS
 static GtkWidget *pos_label;
+#endif
 static GtkWidget *focus_label;
-static GtkWidget *a1a2_label;
+static GtkWidget *a1_label;
+static GtkWidget *a2_label;
 static GtkWidget *fsm_state_label;
+static char plot_aber = FALSE;
+static scope aber_scope;
+static GtkWidget *aber_button[5];
 
 int main(int  argc, char *argv[] )
 {
@@ -116,7 +122,7 @@ int main(int  argc, char *argv[] )
 			case 'd': do_local_display = FALSE;
                                  break;
 
-			case 'E': engineering_mode = TRUE;
+			case 'e': engineering_mode = TRUE;
                                  break;
 
 			case 'p': strcpy(host, p+1);
@@ -247,29 +253,76 @@ int main(int  argc, char *argv[] )
 	wfs_results.a2 = 0.0;
 	wfs_results.fsm_state = 0;
 
-	tilt_label = gtk_label_new("T/T: ");
-        gtk_box_pack_start(GTK_BOX(hbox), tilt_label , TRUE, TRUE, 0);
-        gtk_widget_set_usize (tilt_label, LABAO_WIDTH/5, LABAO_HEIGHT);
-        gtk_widget_show(tilt_label);
+	aber_button[0] = gtk_check_button_new_with_label("");
+	gtk_box_pack_start(GTK_BOX(hbox), aber_button[0], TRUE, TRUE, 0);
+	gtk_container_set_border_width (GTK_CONTAINER (aber_button[0]), 1);
+	gtk_widget_set_usize (aber_button[0],LABAO_WIDTH/20, LABAO_HEIGHT);
+        gtk_toggle_button_set_active((GtkToggleButton *)aber_button[0], 1);
+	gtk_widget_show (aber_button[0]);
 
-	pos_label = gtk_label_new("Pos: ");
+	tilt_x_label = gtk_label_new("");
+        gtk_box_pack_start(GTK_BOX(hbox), tilt_x_label , TRUE, TRUE, 0);
+        gtk_widget_set_usize (tilt_x_label, 3*LABAO_WIDTH/20, LABAO_HEIGHT);
+        gtk_widget_show(tilt_x_label);
+
+	aber_button[1] = gtk_check_button_new_with_label("");
+	gtk_box_pack_start(GTK_BOX(hbox), aber_button[1], TRUE, TRUE, 0);
+	gtk_container_set_border_width (GTK_CONTAINER (aber_button[1]), 1);
+	gtk_widget_set_usize (aber_button[1],LABAO_WIDTH/20, LABAO_HEIGHT);
+        gtk_toggle_button_set_active((GtkToggleButton *)aber_button[1], 1);
+	gtk_widget_show (aber_button[1]);
+
+	tilt_y_label = gtk_label_new("");
+        gtk_box_pack_start(GTK_BOX(hbox), tilt_y_label , TRUE, TRUE, 0);
+        gtk_widget_set_usize (tilt_y_label, 3*LABAO_WIDTH/20, LABAO_HEIGHT);
+        gtk_widget_show(tilt_y_label);
+
+#ifdef SHOW_POS
+	pos_label = gtk_label_new("");
         gtk_box_pack_start(GTK_BOX(hbox), pos_label , TRUE, TRUE, 0);
-        gtk_widget_set_usize (pos_label, LABAO_WIDTH/5, LABAO_HEIGHT);
+        gtk_widget_set_usize (pos_label, LABAO_WIDTH/20, LABAO_HEIGHT);
         gtk_widget_show(pos_label);
+#endif
 
-	focus_label = gtk_label_new("Focus: ");
+	aber_button[2] = gtk_check_button_new_with_label("");
+	gtk_box_pack_start(GTK_BOX(hbox), aber_button[2], TRUE, TRUE, 0);
+	gtk_container_set_border_width (GTK_CONTAINER (aber_button[2]), 1);
+	gtk_widget_set_usize (aber_button[2],LABAO_WIDTH/24, LABAO_HEIGHT);
+        gtk_toggle_button_set_active((GtkToggleButton *)aber_button[2], 1);
+	gtk_widget_show (aber_button[2]);
+
+	focus_label = gtk_label_new("");
         gtk_box_pack_start(GTK_BOX(hbox), focus_label , TRUE, TRUE, 0);
-        gtk_widget_set_usize (focus_label, LABAO_WIDTH/5, LABAO_HEIGHT);
+        gtk_widget_set_usize (focus_label, 3*LABAO_WIDTH/24, LABAO_HEIGHT);
         gtk_widget_show(focus_label);
 
-	a1a2_label = gtk_label_new("A1/A2: ");
-        gtk_box_pack_start(GTK_BOX(hbox), a1a2_label , TRUE, TRUE, 0);
-        gtk_widget_set_usize (a1a2_label, LABAO_WIDTH/5, LABAO_HEIGHT);
-        gtk_widget_show(a1a2_label);
+	aber_button[3] = gtk_check_button_new_with_label("");
+	gtk_box_pack_start(GTK_BOX(hbox), aber_button[3], TRUE, TRUE, 0);
+	gtk_container_set_border_width (GTK_CONTAINER (aber_button[3]), 1);
+	gtk_widget_set_usize (aber_button[3],LABAO_WIDTH/24, LABAO_HEIGHT);
+        gtk_toggle_button_set_active((GtkToggleButton *)aber_button[3], 1);
+	gtk_widget_show (aber_button[3]);
 
-	fsm_state_label = gtk_label_new("State: ");
+	a1_label = gtk_label_new("");
+        gtk_box_pack_start(GTK_BOX(hbox), a1_label , TRUE, TRUE, 0);
+        gtk_widget_set_usize (a1_label, 3*LABAO_WIDTH/24, LABAO_HEIGHT);
+        gtk_widget_show(a1_label);
+
+	aber_button[4] = gtk_check_button_new_with_label("");
+	gtk_box_pack_start(GTK_BOX(hbox), aber_button[4], TRUE, TRUE, 0);
+	gtk_container_set_border_width (GTK_CONTAINER (aber_button[4]), 1);
+	gtk_widget_set_usize (aber_button[4],LABAO_WIDTH/24, LABAO_HEIGHT);
+        gtk_toggle_button_set_active((GtkToggleButton *)aber_button[4], 1);
+	gtk_widget_show (aber_button[4]);
+
+	a2_label = gtk_label_new("");
+        gtk_box_pack_start(GTK_BOX(hbox), a2_label , TRUE, TRUE, 0);
+        gtk_widget_set_usize (a2_label, 3*LABAO_WIDTH/24, LABAO_HEIGHT);
+        gtk_widget_show(a2_label);
+
+	fsm_state_label = gtk_label_new("");
         gtk_box_pack_start(GTK_BOX(hbox), fsm_state_label , TRUE, TRUE, 0);
-        gtk_widget_set_usize (fsm_state_label, LABAO_WIDTH/5, LABAO_HEIGHT);
+        gtk_widget_set_usize (fsm_state_label, LABAO_WIDTH/6, LABAO_HEIGHT);
         gtk_widget_show(fsm_state_label);
 
 	update_wfs_results();
@@ -716,7 +769,7 @@ void print_usage_message(char *name)
         fprintf(stderr,"Flags:\n");
         fprintf(stderr,"-d\t\tTurn off local displays\n");
         fprintf(stderr,"-D[mS]\t\tSet delay in mS between displays (0)\n");
-        fprintf(stderr,"-E\t\tUse engineering mode\n");
+        fprintf(stderr,"-e\t\tUse engineering mode\n");
         fprintf(stderr,"-h\t\tPrint this message\n");
         fprintf(stderr,"-p[host,port]\tSkip socket manager\n");
 
@@ -730,18 +783,53 @@ void print_usage_message(char *name)
 void update_wfs_results(void)
 {
 	char	s[1234];
+	GtkStyle* style;
+        GdkColor color_green = {4L,0,65535,0};
+        GdkColor color_red = {4L,65535,0,0};
+        GdkColor color_dark_blue = {4L,0,0,65535};
+        GdkColor color_purple = {4L,65535,0,65535};
+        GdkColor color_light_blue = {4L,0,65535,65535};
+	float	*values;
 
-	sprintf(s,"T/T: %6.3f/%6.3f", wfs_results.xtilt, wfs_results.ytilt);
-	gtk_label_set_text((GtkLabel *) tilt_label, s);
+	style = gtk_style_copy (gtk_widget_get_style (tilt_x_label));
+	style->fg[GTK_STATE_NORMAL] = color_red;
+        style->fg[GTK_STATE_PRELIGHT] = color_red;
+        gtk_widget_set_style (tilt_x_label, style);
+	sprintf(s,"X: %+6.3f", wfs_results.xtilt);
+	gtk_label_set_text((GtkLabel *) tilt_x_label, s);
 
-	sprintf(s,"Pos: %6.3f/%6.3f", wfs_results.xpos, wfs_results.ypos);
+	style = gtk_style_copy (gtk_widget_get_style (tilt_y_label));
+	style->fg[GTK_STATE_NORMAL] = color_green;
+        style->fg[GTK_STATE_PRELIGHT] = color_green;
+        gtk_widget_set_style (tilt_y_label, style);
+	sprintf(s,"Y: %+6.3f", wfs_results.ytilt);
+	gtk_label_set_text((GtkLabel *) tilt_y_label, s);
+
+#ifdef SHOW_POS
+	sprintf(s,"%+6.3f/%+6.3f", wfs_results.xpos, wfs_results.ypos);
 	gtk_label_set_text((GtkLabel *) pos_label, s);
+#endif
 
-	sprintf(s,"Focus: %6.3f", wfs_results.focus);
+	style = gtk_style_copy (gtk_widget_get_style (focus_label));
+	style->fg[GTK_STATE_NORMAL] = color_purple;
+        style->fg[GTK_STATE_PRELIGHT] = color_purple;
+        gtk_widget_set_style (focus_label, style);
+	sprintf(s,"Foc: %+6.3f", wfs_results.focus);
 	gtk_label_set_text((GtkLabel *) focus_label, s);
 
-	sprintf(s,"A1/A2: %6.3f/%6.3f", wfs_results.a1, wfs_results.a2);
-	gtk_label_set_text((GtkLabel *) a1a2_label, s);
+	style = gtk_style_copy (gtk_widget_get_style (a1_label));
+	style->fg[GTK_STATE_NORMAL] = color_light_blue;
+        style->fg[GTK_STATE_PRELIGHT] = color_light_blue;
+        gtk_widget_set_style (a1_label, style);
+	sprintf(s,"A1: %+6.3f", wfs_results.a1);
+	gtk_label_set_text((GtkLabel *) a1_label, s);
+
+	style = gtk_style_copy (gtk_widget_get_style (a2_label));
+	style->fg[GTK_STATE_NORMAL] = color_dark_blue;
+        style->fg[GTK_STATE_PRELIGHT] = color_dark_blue;
+        gtk_widget_set_style (a2_label, style);
+	sprintf(s,"A2: %+6.3f", wfs_results.a2);
+	gtk_label_set_text((GtkLabel *) a2_label, s);
 
 	switch (wfs_results.fsm_state)
         {
@@ -751,19 +839,93 @@ void update_wfs_results(void)
                         break;
                 case FSM_ZERO_CENTROIDS:
                         gtk_label_set_text((GtkLabel *)fsm_state_label,
-				"Zero Centroids");
+				"Zero Cent");
                         break;
                 case FSM_MEASURE_RECONSTRUCTOR:
 			gtk_label_set_text((GtkLabel *) fsm_state_label, 
-				"Reconstructing");
+				"Reconst");
                         break;
                 case FSM_SERVO_LOOP:
                         gtk_label_set_text((GtkLabel *)fsm_state_label,
-				"Servo Active");
+				"Servo ON");
                         break;
                 default:
                         gtk_label_set_text((GtkLabel *)fsm_state_label,
 				"UNKNOWN");
         }
 
+	if (plot_aber)
+	{
+		values = vector(1, 6);
+
+		values[6] = 0.0;
+
+		if (gtk_toggle_button_get_active(
+		   (GtkToggleButton *)aber_button[0]))
+		{
+			values[1] =  wfs_results.xtilt;
+		}
+		else
+			values[1] = 0.0;
+
+		if (gtk_toggle_button_get_active(
+		   (GtkToggleButton *)aber_button[1]))
+			values[2] =  wfs_results.ytilt;
+		else
+			values[2] = 0.0;
+
+		if (gtk_toggle_button_get_active(
+		   (GtkToggleButton *)aber_button[2]))
+			values[3] =  wfs_results.focus;
+		else
+			values[3] = 0.0;
+
+		if (gtk_toggle_button_get_active(
+		   (GtkToggleButton *)aber_button[3]))
+			values[4] =  wfs_results.a1;
+		else
+			values[4] = 0.0;
+
+		if (gtk_toggle_button_get_active(
+		   (GtkToggleButton *)aber_button[4]))
+			values[5] =  wfs_results.a2;
+		else
+			values[5] = 0.0;
+
+		update_scope(aber_scope, values);
+		free_vector(values, 1, 6);
+	}
+
 } /* update_wfs_results() */
+
+/************************************************************************/
+/* labao_plot_aber_callback()                                           */
+/*                                                                      */
+/************************************************************************/
+
+void labao_plot_aber_callback(GtkButton *button, gpointer user_data)
+{
+
+	if (plot_aber)
+	{
+		/* We turn things off */
+
+		close_scope(&aber_scope);
+		XFlush(theDisplay);
+		plot_aber = FALSE;
+	}
+	else
+	{
+		aber_scope = open_scope(server_name, 100, 100, 400, 200);
+
+		add_signal(&aber_scope, PLOT_RED, -0.75, 0.75);
+		add_signal(&aber_scope, PLOT_GREEN, -0.75, 0.75);
+		add_signal(&aber_scope, PLOT_PURPLE, -0.75, 0.75);
+		add_signal(&aber_scope, PLOT_LIGHT_BLUE, -0.75, 0.75);
+		add_signal(&aber_scope, PLOT_DARK_BLUE, -0.75, 0.75);
+		add_signal(&aber_scope, PLOT_WHITE, -0.75, 0.75);
+
+		plot_aber = TRUE;
+	}
+
+} /* labao_plot_aber_callback() */

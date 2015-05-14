@@ -66,6 +66,7 @@ int linux_time_status(void)
 {
 	time_t current_time;
 	struct tm *now;
+	static last_time = 0;
 
 	time(&current_time);
 	now = localtime(&current_time);
@@ -78,8 +79,18 @@ int linux_time_status(void)
 	/* Do we need to save anything? */
 
 	process_server_socket(telescope_server);
+	process_server_socket(pico_server);
 	complete_aberrations_record();
 	complete_fits_cube();
+
+	/* Periodic things */
+
+	if (current_time > last_time)
+	{
+		last_time = current_time;
+
+		send_labao_value_all_channels(TRUE);
+	}
 
 	return NOERROR;
 

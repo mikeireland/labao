@@ -35,6 +35,7 @@
 #include <nsimpleX.h>
 #include <sys/time.h>
 #include <zlib.h>
+#include <nsimpleX.h>
 
 #ifdef GTK2
 #define LABAO_WIDTH		608
@@ -85,6 +86,7 @@ void clear_display_callback(void);
 void status_page_callback(void);
 void print_usage_message(char *name);
 void update_wfs_results(void);
+void labao_plot_aber_callback(GtkButton *button, gpointer user_data);
 
 /* messages.c */
 
@@ -117,6 +119,7 @@ int message_labao_stop_usb_image(int server, struct smessage *mess);
 void fill_wfs_page(GtkWidget *vbox);
 void labao_autoalign_lab_callback(GtkButton *button, gpointer data);
 void labao_autoalign_scope_callback(GtkButton *button, gpointer data);
+void labao_autoalign_zernike_callback(GtkButton *button, gpointer data);
 void labao_num_mean_callback(GtkButton *button, gpointer data);
 void labao_save_aberrations_callback(GtkButton *button, gpointer data);
 void labao_save_data_callback(GtkButton *button, gpointer data);

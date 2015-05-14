@@ -37,8 +37,12 @@
 #define ACTUATOR_POKE  0.2
 #define NUM_INNER_ACTUATORS 19
 #define DEFAULT_AUTOALIGN_COUNT 20
+#define LAB_ALIGN_LIMIT		0.01
 #define LAB_ALIGN_STEP		50
+#define SCOPE_ALIGN_LIMIT	0.05
 #define SCOPE_ALIGN_STEP	100
+#define ZERNIKE_ALIGN_LIMIT	0.075
+#define ZERNIKE_ALIGN_STEP	0.005
 
 /* Optionally enforce zero piston. With SERVO_DAMPING < 1 and a reasonable reconstructor,
    this shouldn't be needed */
@@ -71,8 +75,8 @@ static float centroid_yw[CENTROID_WINDOW_WIDTH][CENTROID_WINDOW_WIDTH];
 
 /* Maximum number of elements in a saved report */
 
-#define MAX_ABERRATIONS_RECORD      10000
-#define MAX_DATA_RECORD         10000
+#define MAX_ABERRATIONS_RECORD      100000
+#define MAX_DATA_RECORD         100000
 
 /*
  * Some important local globals. PHILOSOPHY: Using these is a little tricky, as
@@ -91,7 +95,10 @@ static float fsm_xc_int[NUM_LENSLETS];
 static float fsm_yc_int[NUM_LENSLETS];
 static int fsm_cyclenum=0;
 static float fsm_flat_dm[NUM_ACTUATORS];
+static float fsm_mean_dm[NUM_ACTUATORS];
+static float fsm_calc_mean_dm[NUM_ACTUATORS];
 static float fsm_dm_offset[NUM_ACTUATORS];
+static float last_delta_dm[NUM_ACTUATORS];
 static pthread_mutex_t fsm_mutex = PTHREAD_MUTEX_INITIALIZER;
 static int actuator=1;
 static int wfs_results_num = ((int)DEFAULT_FRAME_RATE);
@@ -99,6 +106,7 @@ static int wfs_results_n = 0;
 static struct s_labao_wfs_results wfs_reference;
 static bool autoalign_lab_dichroic = FALSE;
 static bool autoalign_scope_dichroic = FALSE;
+static bool autoalign_zernike = FALSE;
 static	int autoalign_count = 0;
 static float zero_clamp = ZERO_CLAMP;
 static float denom_clamp = DENOM_CLAMP;
@@ -112,6 +120,7 @@ static float aberration_xc[NUM_LENSLETS];
 static float aberration_yc[NUM_LENSLETS];
 static bool use_reference = FALSE;
 static bool set_reference = FALSE;
+static bool use_servo_flat = TRUE;
 
 /* Globals. */
 
@@ -170,7 +179,10 @@ void initialize_fsm(void)
 	for (i=0;i<NUM_ACTUATORS;i++)
 	{
 		fsm_flat_dm[i]=DM_DEFAULT;
+		fsm_mean_dm[i]=DM_DEFAULT;
+		fsm_calc_mean_dm[i]=DM_DEFAULT;
 		fsm_dm_offset[i]=0.0;	
+		last_delta_dm[i]=0.0;	
 	}
 
 	for (i=0;i<NUM_LENSLETS;i++)
@@ -772,11 +784,13 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 		float **data, int aoi_width, int aoi_height)
 {
 	int i,j,l,left,bottom,box_left, box_bottom, poke_sign;
+	float last_servo_gain_flat;
 	float new_xc[NUM_LENSLETS];
 	float new_yc[NUM_LENSLETS];
 	float max;
 	float fluxes[NUM_LENSLETS];
 	float new_dm[NUM_ACTUATORS+1];
+	float delta_dm[NUM_ACTUATORS+1];
 	int x,y,dx,dy;
 	bool is_new_actuator=TRUE;
 	float outer_dm_mean = 0.0;
@@ -906,8 +920,8 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 		    get_usb_camera_aoi(&x,&y,&dx,&dy);
 		    for (l=0;l<NUM_LENSLETS;l++)
 		    {
-			x_centroid_offsets[l] += fsm_xc_int[l]/NUM_LABAO_ZERO_AVG;
-			y_centroid_offsets[l] += fsm_yc_int[l]/NUM_LABAO_ZERO_AVG;
+			x_centroid_offsets[l]+=fsm_xc_int[l]/NUM_LABAO_ZERO_AVG;
+			y_centroid_offsets[l]+=fsm_yc_int[l]/NUM_LABAO_ZERO_AVG;
 
 			/* Sanity check the numbers */
 
@@ -1024,13 +1038,12 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 		break;
 	
 	case FSM_APPLY_RECON_ONCE: /* Run the servo loop once with gain=1.0 */
-		servo_gain = 1.0;
+		last_servo_gain_flat = servo_gain_flat;
+		servo_gain_flat = 1.0;
+		fsm_cyclenum = 0;
 
 	case FSM_SERVO_LOOP:
-		if (fsm_cyclenum == 0)
-		{
-		    for (i=0;i<NUM_ACTUATORS;i++) fsm_dm_offset[i]=0.0;
-		}
+
 		for (i=0;i<NUM_ACTUATORS;i++)
 		{
 		    /* 
@@ -1038,15 +1051,19 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
  		     * so damp the DM position to flat
  		     */
 
-		    if (fsm_state ==  FSM_SERVO_LOOP)
-			fsm_dm_offset[i] *= servo_damping;
+		    if (fsm_cyclenum > 0 && 
+			use_servo_flat && 
+			fsm_state ==  FSM_SERVO_LOOP)
+		  	    fsm_dm_offset[i] *= servo_damping_flat;
+		    else
+			    fsm_dm_offset[i] = 0.0;
 
-			/* 
- 			 * If needed, find the overall tilt. 
- 			 * NB This requires that all 
-			 * lenslets are illuminated!
-			 * It probably needs to be a weighted average.
-			 */
+		    /* 
+ 		     * If needed, find the overall tilt. 
+ 		     * NB This requires that all 
+		     * lenslets are illuminated!
+		     * It probably needs to be a weighted average.
+		     */
 
 		    if (fsm_ignore_tilt)
 		    {
@@ -1061,55 +1078,100 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 
 		    /* Apply the reconstructor */
 
-		    for (l=0;l<NUM_LENSLETS;l++)
+		    if (use_servo_flat)
 		    {
+		      for (l=0;l<NUM_LENSLETS;l++)
+		      {
 			fsm_dm_offset[i] -= 
-			    servo_gain*fsm_reconstructor[i][l]*(new_xc[l]
+			 servo_gain_flat * fsm_reconstructor[i][l]*(new_xc[l]
 				- xtilt + aberration_xc[l]);
 			fsm_dm_offset[i] -= 
-			    servo_gain*fsm_reconstructor[i][NUM_LENSLETS+l] *
+			  servo_gain_flat*fsm_reconstructor[i][NUM_LENSLETS+l] *
 				(new_yc[l] - ytilt + aberration_yc[l]);
-		    }
-
-		    /* Average outer_actuators to enforce zero-piston */
-
-		    if (i >= NUM_INNER_ACTUATORS)
-			outer_dm_mean += fsm_dm_offset[i];
-		}
-
+		      }
 #ifdef ENFORCE_ZERO_PISTON
-		/* Enforce zero-piston */
-
-		outer_dm_mean /= (NUM_ACTUATORS - NUM_INNER_ACTUATORS);
-		for (i=NUM_INNER_ACTUATORS;i<NUM_ACTUATORS;i++)
-			fsm_dm_offset[i] -= outer_dm_mean;
+		      if (i >= NUM_INNER_ACTUATORS)
+			outer_dm_mean += fsm_dm_offset[i];
 #endif
+		    }
+		    else
+		    {
+		      for (l=0;l<NUM_LENSLETS;l++)
+		      {
+			fsm_dm_offset[i] -= 
+			 fsm_reconstructor[i][l]*(new_xc[l]
+				- xtilt + aberration_xc[l]);
+			fsm_dm_offset[i] -= 
+			  fsm_reconstructor[i][NUM_LENSLETS+l] *
+				(new_yc[l] - ytilt + aberration_yc[l]);
+		      }
+		    }
+		}
 
 		/* Add in the flat wavefront. */
 
-		for (i=0;i<NUM_ACTUATORS;i++)
+	        if (use_servo_flat)
 		{
-		    new_dm[i+1] = fsm_flat_dm[i]+fsm_dm_offset[i];
-		    
-	            /* Limit positions to the range 0 to 1 */
+		    /* Work out avergae on the edge */
 
-	            if (new_dm[i+1] > 1)
+#ifdef ENFORCE_ZERO_PISTON
+		    outer_dm_mean /= (NUM_ACTUATORS - NUM_INNER_ACTUATORS);
+#endif
+
+		    for (i=0;i<NUM_ACTUATORS;i++)
 		    {
+		        new_dm[i+1] = fsm_flat_dm[i] + fsm_dm_offset[i];
+
+#ifdef ENFORCE_ZERO_PISTON
+			if (i >= NUM_INNER_ACTUATORS)
+				new_dm[i+1] -= outer_dm_mean;
+#endif
+		    }
+		    
+		}
+		else
+		{
+		    for (i=0;i<NUM_ACTUATORS;i++)
+		    {
+			delta_dm[i] = servo_gain_delta * fsm_dm_offset[i] -
+				servo_damping_delta * last_delta_dm[i];
+			last_delta_dm[i] = delta_dm[i];
+			new_dm[i+1] = edac40_current_value(i+1) + delta_dm[i];
+
+#ifdef ENFORCE_ZERO_PISTON
+			if (i > NUM_INNER_ACTUATORS)
+			  outer_dm_mean += (new_dm[i] - fsm_flat_dm[i]);
+#endif
+		    }
+		    
+#ifdef ENFORCE_ZERO_PISTON
+		    outer_dm_mean /= (NUM_ACTUATORS - NUM_INNER_ACTUATORS);
+
+		    for (i=NUM_INNER_ACTUATORS;i<NUM_ACTUATORS;i++)
+		    {
+			new_dm[i] -= outer_dm_mean;
+		    }
+#endif
+		}
+
+	        /* Limit positions to the range 0 to 1 */
+
+	        if (new_dm[i+1] > 1)
+		{
 			if (fsm_state != FSM_APPLY_RECON_ONCE)
 			 	fsm_dm_offset[i] -= new_dm[i+1]-1;
 			new_dm[i+1] = 1.0;
-		    }
+		}
 
-		    if (new_dm[i+1] < 0) {
+		if (new_dm[i+1] < 0)
+		{
 			if (fsm_state != FSM_APPLY_RECON_ONCE)
 			 	fsm_dm_offset[i] -= new_dm[i+1];
 			new_dm[i+1] = 0.0;
-		    }
 		}
 
 		/* Send off the DM command! */
 
-#warning ADD A WAY OF CALCULATING A MEAN DM POSITION HERE FOR SETTING FLAT.
 		if (edac40_set_all_channels(new_dm))
 		{
 		       	message(system_window, 
@@ -1122,6 +1184,7 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 		{
 			fsm_state = FSM_CENTROIDS_ONLY;
 			fsm_cyclenum = 0;
+			servo_gain_flat = last_servo_gain_flat;
 		}
 		break;
 
@@ -1239,6 +1302,8 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 	calc_labao_results.ypos += ypos;
 	calc_labao_results.a1 += a1;
 	calc_labao_results.a2 += a2;
+	 for (i=0;i<NUM_ACTUATORS;i++)
+                fsm_calc_mean_dm[i] += edac40_current_value(i+1);
 
 	if (++wfs_results_n >= wfs_results_num)
 	{
@@ -1247,6 +1312,7 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 		wfs_results.focus = calc_labao_results.focus/wfs_results_num;
 		wfs_results.xpos = calc_labao_results.xpos/wfs_results_num;
 		wfs_results.ypos = calc_labao_results.ypos/wfs_results_num;
+		wfs_results.fsm_state = fsm_state;
 
 		if (set_center)
 		{
@@ -1259,6 +1325,12 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 		wfs_results.ypos -= ypos_center;
 		wfs_results.a1 = calc_labao_results.a1/wfs_results_num;
 		wfs_results.a2 = calc_labao_results.a2/wfs_results_num;
+
+		for (i=0;i<NUM_ACTUATORS;i++)
+                {
+                        fsm_mean_dm[i] = fsm_calc_mean_dm[i]/wfs_results_num;
+                        fsm_calc_mean_dm[i] = 0.0;
+                }
 
 		if (set_reference)
 		{
@@ -1488,10 +1560,10 @@ int fsm_status(void)
 	/* Is there a new mean we can work with? */
 
 	pthread_mutex_lock(&fsm_mutex);
-	if (new_aberrations && time(NULL) > last_time)
+
+	if (new_aberrations)
 	{
 		new_aberrations = FALSE;
-		last_time = time(NULL);
 
 		/* Let the user know about this */
 
@@ -1502,12 +1574,12 @@ int fsm_status(void)
 
 		/* Are we trying to align things? */
 
-		if (autoalign_lab_dichroic)
+		if (autoalign_lab_dichroic && time(NULL) > last_time)
 		{
 			/* Is it done? */
 
-			if (fabs(wfs_results.xtilt) < 0.01 &&
-			    fabs(wfs_results.ytilt) < 0.01)
+			if (fabs(wfs_results.xtilt) < LAB_ALIGN_LIMIT &&
+			    fabs(wfs_results.ytilt) < LAB_ALIGN_LIMIT)
 			{
 				autoalign_lab_dichroic = FALSE;
 				autoalign_count = 0;
@@ -1548,13 +1620,13 @@ int fsm_status(void)
 
 			if (autoalign_count % 2)
 			{
-			    if (wfs_results.xtilt >= 0.01)
+			    if (wfs_results.xtilt >= LAB_ALIGN_LIMIT)
 			    {
 				mirror_move.direction = DOWN;
 				send_message(pico_server, &mess);
 				strcat(s," Moving DOWN");
 			    }
-			    else if (wfs_results.xtilt <= -0.01)
+			    else if (wfs_results.xtilt <= -1.0*LAB_ALIGN_LIMIT)
 			    {
 				mirror_move.direction = UP;
 				send_message(pico_server, &mess);
@@ -1567,13 +1639,13 @@ int fsm_status(void)
 			}
 			else
 			{
-			    if (wfs_results.ytilt >= 0.01)
+			    if (wfs_results.ytilt >= LAB_ALIGN_LIMIT)
 			    {
 				mirror_move.direction = RIGHT;
 				send_message(pico_server, &mess);
 				strcat(s," Moving RIGHT");
 			    }
-			    else if (wfs_results.ytilt <= -0.01)
+			    else if (wfs_results.ytilt <= -1.0*LAB_ALIGN_LIMIT)
 			    {
 				mirror_move.direction = LEFT;
 				send_message(pico_server, &mess);
@@ -1586,14 +1658,18 @@ int fsm_status(void)
 			}
 			message(system_window,s);
 			send_labao_text_message("%s", s);
+
+			/* OK, this is now done */
+
+			last_time = time(NULL);
 		}
 
-		if (autoalign_scope_dichroic)
+		if (autoalign_scope_dichroic && time(NULL) > last_time+2)
 		{
 			/* Is it done? */
 
-			if (fabs(wfs_results.xtilt) < 0.05 &&
-			    fabs(wfs_results.ytilt) < 0.05)
+			if (fabs(wfs_results.xtilt) < SCOPE_ALIGN_LIMIT &&
+			    fabs(wfs_results.ytilt) < SCOPE_ALIGN_LIMIT)
 			{
 				autoalign_scope_dichroic = FALSE;
 				autoalign_count = 0;
@@ -1609,7 +1685,7 @@ int fsm_status(void)
 
 			if (--autoalign_count < 0)
 			{
-				autoalign_lab_dichroic = FALSE;
+				autoalign_scope_dichroic = FALSE;
 				autoalign_count = 0;
 				message(system_window,
 					"Giving up on scope autoalignment.");
@@ -1640,20 +1716,18 @@ int fsm_status(void)
 			wfs_results.xtilt, x, wfs_results.ytilt, y);
 			if (autoalign_count % 2)
 			{
-			    if (x > 0.05)
+			    if (x > SCOPE_ALIGN_LIMIT)
 			    {
 				motor_move.motor = AOB_DICHR_2;
 				motor_move.position = SCOPE_ALIGN_STEP;
 				send_message(telescope_server, &mess);
-				last_time++;
 				strcat(s," Moving RIGHT");
 			    }
-			    else if (x < -0.06)
+			    else if (x < -1.0*SCOPE_ALIGN_LIMIT)
 			    {
 				motor_move.motor = AOB_DICHR_2;
 				motor_move.position = -1.0*SCOPE_ALIGN_STEP;
 				send_message(telescope_server, &mess);
-				last_time++;
 				strcat(s," Moving LEFT");
 			    }
 			    else
@@ -1663,20 +1737,18 @@ int fsm_status(void)
 			}
 			else
 			{
-			    if (y > 0.05)
+			    if (y > SCOPE_ALIGN_LIMIT)
 			    {
 				motor_move.motor = AOB_DICHR_1;
 				motor_move.position = SCOPE_ALIGN_STEP;
 				send_message(telescope_server, &mess);
-				last_time++;
 				strcat(s," Moving UP");
 			    }
-			    else if (y < -0.06)
+			    else if (y < -1.0 * SCOPE_ALIGN_LIMIT)
 			    {
 				motor_move.motor = AOB_DICHR_1;
 				motor_move.position = -1.0*SCOPE_ALIGN_STEP;
 				send_message(telescope_server, &mess);
-				last_time++;
 				strcat(s," Moving DOWN");
 			    }
 			    else
@@ -1687,6 +1759,102 @@ int fsm_status(void)
 
 			message(system_window,s);
 			send_labao_text_message("%s", s);
+
+			/* OK, this is now done */
+
+			last_time = time(NULL);
+		}
+
+		if (autoalign_zernike && time(NULL) > last_time)
+		{
+			/* Is it done? */
+
+			if (fabs(wfs_results.focus) < ZERNIKE_ALIGN_LIMIT &&
+			    fabs(wfs_results.a1) < ZERNIKE_ALIGN_LIMIT &&
+			    fabs(wfs_results.a1) < ZERNIKE_ALIGN_LIMIT)
+			{
+				autoalign_zernike = FALSE;
+				autoalign_count = 0;
+				message(system_window,
+					"Zernike Autoalignment is complete.");
+				send_labao_text_message("%s", 
+					"Zernike Autoalignment is complete.");
+				pthread_mutex_unlock(&fsm_mutex);
+				return NOERROR;
+			}
+
+			/* Have we tried too many times? */
+
+			if (--autoalign_count < 0)
+			{
+				autoalign_zernike = FALSE;
+				autoalign_count = 0;
+				message(system_window,
+					"Giving up on Zernike autoalignment.");
+				send_labao_text_message("%s",
+					"Giving up on Zernike autoalignment.");
+				pthread_mutex_unlock(&fsm_mutex);
+				return NOERROR;
+			}
+
+			/* Tell the user */
+
+			sprintf(s, "%d F = %.3f A1 = %.3f A2 = %.3f -", 
+				autoalign_count+1, 
+				wfs_results.focus, 
+				wfs_results.a1, wfs_results.a2);
+
+			if (wfs_results.focus > ZERNIKE_ALIGN_LIMIT)
+			{
+				strcat(s," F ++");
+				increment_zernike(1, ZERNIKE_ALIGN_STEP);
+			}
+			else if (wfs_results.focus < -1.0 * ZERNIKE_ALIGN_LIMIT)
+			{
+				strcat(s," F --");
+				increment_zernike(1, -1.0 * ZERNIKE_ALIGN_STEP);
+			}
+			else
+			{
+				strcat(s, "F OK.");
+			}
+
+			if (wfs_results.a1 > ZERNIKE_ALIGN_LIMIT)
+			{
+				strcat(s," A1 ++");
+				increment_zernike(6, -1.0 * ZERNIKE_ALIGN_STEP);
+			}
+			else if (wfs_results.focus < -1.0 * ZERNIKE_ALIGN_LIMIT)
+			{
+				strcat(s," A1 --");
+				increment_zernike(6,ZERNIKE_ALIGN_STEP);
+			}
+			else
+			{
+				strcat(s, "A1 OK.");
+			}
+
+			if (wfs_results.a2 > ZERNIKE_ALIGN_LIMIT)
+			{
+				strcat(s," A2 ++");
+				increment_zernike(5, ZERNIKE_ALIGN_STEP);
+			}
+			else if (wfs_results.focus < -1.0 * ZERNIKE_ALIGN_LIMIT)
+			{
+				strcat(s," A2 --");
+				increment_zernike(5,-1.0 * ZERNIKE_ALIGN_STEP);
+			}
+			else
+			{
+				strcat(s, "A2 OK.");
+			}
+
+			message(system_window,s);
+			send_labao_text_message("%s", s);
+
+			/* OK, this is now done */
+
+			last_time = time(NULL);
 		}
 
 		/* Now output these variables to the status window */
@@ -1711,6 +1879,7 @@ int fsm_status(void)
 		wprintw(status_window, "%6.3f %6.3f", 
 			wfs_results.a1, wfs_results.a2);
 	}
+
 	pthread_mutex_unlock(&fsm_mutex);
 
 	return NOERROR;
@@ -1825,9 +1994,22 @@ int save_reconstructor(int argc, char **argv)
 int set_flat_dm(void)
 {
 	int i;	
+        time_t start;
 
-	for (i=0;i<NUM_ACTUATORS;i++)
-		fsm_flat_dm[i]=edac40_current_value(i+1);
+        start = time(NULL);
+        new_aberrations = FALSE;
+        while(!new_aberrations)
+        {
+                if (time(NULL) > start+120) return ERROR;
+                message(system_window,"Waiting for new mean DM %d",
+                        (int)time(NULL) - start);
+                send_labao_text_message("Waiting for new mean DM %d",
+                        (int)time(NULL) - start);
+        }
+        message(system_window,"New DM flat set");
+        send_labao_text_message("New DM flat set");
+
+        for (i=0;i<NUM_ACTUATORS;i++) fsm_flat_dm[i] = fsm_mean_dm[i];
 
 	return NOERROR;
 
@@ -1978,7 +2160,7 @@ int edit_wfs_results_num(int argc, char **argv)
 	if (n > 0) wfs_results_num = n;
 
 	
-	send_labao_text_message("Sampels for integration = %d.", n);
+	send_labao_text_message("Samples for integration = %d.", n);
 
 	return NOERROR;
 
@@ -1994,8 +2176,8 @@ int start_autoalign_lab_dichroic(int argc, char **argv)
 {
         char    s[100];
 
-	if (autoalign_scope_dichroic)
-		return error(ERROR,"Busy aligning Scope Dichroic.");
+	if (autoalign_scope_dichroic || autoalign_zernike)
+		return error(ERROR,"Already running Auto Alignment.");
 
         /* Check out the command line */
 
@@ -2011,6 +2193,14 @@ int start_autoalign_lab_dichroic(int argc, char **argv)
                    == KEY_ESC) return NOERROR;
                 sscanf(s,"%d",&autoalign_count);
         }
+
+	/* First, let's make sure the pico connection is there */
+
+#warning This stops the PICO server If it is switched off.
+	
+	if (pico_server != -1) close_server_socket(pico_server);
+
+	if (open_pico_connection(0, NULL) != NOERROR) return ERROR;
 
 	message(system_window,"Lab autoalignment begins Trys = %d",
 		autoalign_count);
@@ -2043,11 +2233,8 @@ int start_autoalign_scope_dichroic(int argc, char **argv)
 {
         char    s[100];
 
-	if (autoalign_lab_dichroic)
-		return error(ERROR,"Busy aligning Lab Dichroic.");
-
-	if (telescope_server < 0)
-		return error(ERROR,"Not talking to telescope server.");
+	if (autoalign_lab_dichroic || autoalign_zernike)
+		return error(ERROR,"Already running Auto Alignment.");
 
         /* Check out the command line */
 
@@ -2061,7 +2248,11 @@ int start_autoalign_scope_dichroic(int argc, char **argv)
                 sprintf(s,"%9d", DEFAULT_AUTOALIGN_COUNT);
                 if (quick_edit("Maximum number of steps",s,s,NULL,INTEGER)
                    == KEY_ESC) return NOERROR;
-                sscanf(s,"%d",&autoalign_count); } 
+                sscanf(s,"%d",&autoalign_count);
+	} 
+
+	if (open_telescope_connection(0, NULL) != NOERROR) return ERROR;
+
 	message(system_window,"Scope autoalignment begins Trys = %d",
 		autoalign_count);
 
@@ -2073,19 +2264,63 @@ int start_autoalign_scope_dichroic(int argc, char **argv)
 } /* start_autoalign_scope_dichroic() */
 
 /************************************************************************/
-/* stop_autoalign_dichroic()						*/
+/* start_autoalign_zernike()						*/
+/*									*/
+/* Starts the Zernike Automated alignment routine.			*/
+/************************************************************************/
+
+int start_autoalign_zernike(int argc, char **argv)
+{
+        char    s[100];
+
+	if (autoalign_lab_dichroic || autoalign_scope_dichroic)
+		return error(ERROR,"Already running Auto Alignment.");
+
+        /* Check out the command line */
+
+        if (argc > 1)
+        {
+                sscanf(argv[1],"%d",&autoalign_count);
+        }
+        else
+        {
+                clean_command_line();
+                sprintf(s,"%9d", DEFAULT_AUTOALIGN_COUNT);
+                if (quick_edit("Maximum number of steps",s,s,NULL,INTEGER)
+                   == KEY_ESC) return NOERROR;
+                sscanf(s,"%d",&autoalign_count);
+	} 
+
+	message(system_window,"Zernike autoalignment begins Trys = %d",
+		autoalign_count);
+
+	fsm_state = FSM_CENTROIDS_ONLY;
+	use_reference = FALSE;
+	call_load_zernike(0, NULL);
+	autoalign_zernike = TRUE;
+
+	return NOERROR;
+
+} /* start_autoalign_zernike() */
+
+/************************************************************************/
+/* stop_autoalign()							*/
 /*									*/
 /* Stops the Dichroic Automated alignment routine.			*/
 /************************************************************************/
 
-int stop_autoalign_dichroic(int argc, char **argv)
+int stop_autoalign(int argc, char **argv)
 {
 	autoalign_lab_dichroic = FALSE;
 	autoalign_scope_dichroic = FALSE;
+	autoalign_zernike = FALSE;
+	use_reference = FALSE;
+
+	message(system_window, "Auto alignment has been stopped.");
 
 	return NOERROR;
 
-} /* stop_autoalign_dichroic() */
+} /* stop_autoalign() */
 
 /************************************************************************/
 /* edit_servo_parameters()						*/
@@ -2099,6 +2334,17 @@ int edit_servo_parameters(int argc, char **argv)
 
         /* Check out the command line */
 
+	if (use_servo_flat)
+	{
+		gain = servo_gain_flat;
+		damping = servo_damping_flat;
+	}
+	else
+	{
+		gain = servo_gain_delta;
+		damping = servo_damping_delta;
+	}
+
         if (argc > 1)
         {
                 sscanf(argv[1],"%f",&gain);
@@ -2106,7 +2352,7 @@ int edit_servo_parameters(int argc, char **argv)
         else
         {
                 clean_command_line();
-                sprintf(s,"%9.2f", servo_gain);
+                sprintf(s,"%9.2f", gain);
                 if (quick_edit("Servo Gain",s,s,NULL,FLOAT)
                    == KEY_ESC) return NOERROR;
                 sscanf(s,"%f",&gain);
@@ -2122,7 +2368,7 @@ int edit_servo_parameters(int argc, char **argv)
         else
         {
                 clean_command_line();
-                sprintf(s,"%9.2f", servo_damping);
+                sprintf(s,"%9.2f", damping);
                 if (quick_edit("Servo Damping",s,s,NULL,FLOAT)
                    == KEY_ESC) return NOERROR;
                 sscanf(s,"%f",&damping);
@@ -2131,8 +2377,16 @@ int edit_servo_parameters(int argc, char **argv)
 	if (damping < 0.0 || damping > 1.0) return 
 		error(ERROR,"Damping must be between 0 and 1.");
 
-	servo_gain = gain;
-	servo_damping = damping;
+	if (use_servo_flat)
+	{
+		servo_gain_flat = gain;
+		servo_damping_flat = damping;
+	}
+	else
+	{
+		servo_gain_delta = gain;
+		servo_damping_delta = damping;
+	}
 
 	return NOERROR;
 
@@ -2521,3 +2775,28 @@ int set_reference_now(int argc, char **argv)
 	return NOERROR;
 
 } /* set_reference_now() */
+
+/************************************************************************/
+/* toggle_use_servo_flat()						*/
+/*									*/
+/* Switch between servo types.						*/
+/************************************************************************/
+
+int toggle_use_servo_flat(int argc, char **argv)
+{
+	use_servo_flat = !use_servo_flat;
+
+	if (use_servo_flat)
+	{
+	    message(system_window, "Using servo FLAT.");
+	    send_labao_text_message( "Using servo FLAT.");
+	}
+	else
+	{
+	    message(system_window, "Using servo DELTA.");
+	    send_labao_text_message( "Using servo DELTA.");
+	}
+
+	return NOERROR;
+
+} /* toggle_use_servo_flat() */

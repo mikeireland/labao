@@ -13,6 +13,7 @@
 /* 4.0 - Aberration calculations in RT thread. Can save data.		*/
 /* 4.1 - Some small corrections after testing 2014_10_01		*/
 /* 4.2 - Added offsets for reference beam focus etc. 2015 02 02		*/
+/* 4.3 - Recompiled for Centos 7 and doesn't try to close USB cam.	*/
 /************************************************************************/
 /*                                                                      */
 /*                    CHARA ARRAY USER INTERFACE			*/
@@ -59,8 +60,10 @@ char    *pico_servers[NUM_PICO_SERVERS] = {"PICO_1", "PICO_2", "PICO_3",
 int     telescope_server = -1;
 int	dich_mirror = -1;
 struct SMIRROR_LIST mirror_list[MAX_SERVERS];
-float servo_gain = SERVO_GAIN;
-float servo_damping = SERVO_DAMPING;
+float servo_gain_flat = SERVO_GAIN_FLAT;
+float servo_damping_flat = SERVO_DAMPING_FLAT;
+float servo_gain_delta = SERVO_GAIN_DELTA;
+float servo_damping_delta = SERVO_DAMPING_DELTA;
 float    xpos_center = 0.0;
 float    ypos_center = 0.0;
 struct s_scope_status telescope_status;
@@ -142,7 +145,7 @@ int main(int argc, char **argv)
 	ui_clear_screen();
 	put_line("");
 
-	sprintf(title,"%s 4.2",labao_name);
+	sprintf(title,"%s 4.3",labao_name);
 	center_line(title);
 	put_line("");
 	center_line("The CHARA Array");
@@ -326,12 +329,15 @@ int open_pico_connection(int argc, char **argv)
 
 	if (pico_server != -1) close_server_socket(pico_server);
 
+	process_server_socket(pico_server);
+
 	/* Go through the pico servers and try and find M10 mirror */
 
 	sprintf(dich,"%sDICH", scope_types[this_labao]);
 	for(i=0; i<NUM_PICO_SERVERS; i++)
 	{
 		pico_server = open_pico_server(pico_servers[i]);
+
 		if (pico_server < 0)
 		{
 			message(system_window,

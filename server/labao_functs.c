@@ -128,7 +128,8 @@ struct {
 		{"num",		edit_wfs_results_num},
 		{"alab",	start_autoalign_lab_dichroic},
 		{"ascope",	start_autoalign_scope_dichroic},
-		{"sdich",	stop_autoalign_dichroic},
+		{"azern",	start_autoalign_zernike},
+		{"sdich",	stop_autoalign},
 		{"esp",		edit_servo_parameters},
 		{"move",	move_boxes},
 		{"ezc",		edit_zero_clamp},
@@ -140,5 +141,6 @@ struct {
 		{"tur",       	toggle_use_reference},
 		{"togref",     	toggle_use_reference},
 		{"setref",     	set_reference_now},
+		{"tusf",     	toggle_use_servo_flat},
 
 		{NULL,		NULL}	};

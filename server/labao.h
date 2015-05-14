@@ -67,13 +67,15 @@
 #define NUM_LENSLETS	32
 #define DEFAULT_MAXJ	21
 
-#define DEFAULT_FRAME_RATE	(200.0)
+#define DEFAULT_FRAME_RATE	(100.0)
 #define CENTROID_BOX_WIDTH 11
 
 #define ARCSEC_PER_PIX 0.3
 
-#define SERVO_DAMPING 0.9
-#define SERVO_GAIN 0.5
+#define SERVO_DAMPING_FLAT 0.9
+#define SERVO_GAIN_FLAT 0.5
+#define SERVO_DAMPING_DELTA 0.0
+#define SERVO_GAIN_DELTA 0.0
 
 /*
  * Some globals
@@ -115,8 +117,10 @@ extern char	*pico_servers[NUM_PICO_SERVERS];
 extern int	telescope_server;
 extern int	dich_mirror;
 extern struct SMIRROR_LIST mirror_list[];
-extern float servo_gain;
-extern float servo_damping;
+extern float servo_gain_flat;
+extern float servo_damping_flat;
+extern float servo_gain_delta;
+extern float servo_damping_delta;
 
 /* So we know where the telescope is */
 
@@ -154,6 +158,7 @@ int message_labao_inc_zernike(struct smessage *message);
 int message_labao_run_function(struct smessage *message);
 int message_labao_start_autoalign_lab(struct smessage *message);
 int message_labao_start_autoalign_scope(struct smessage *message);
+int message_labao_start_autoalign_zernike(struct smessage *message);
 int message_labao_stop_autoalign(struct smessage *message);
 int message_labao_edac40_add(struct smessage *message);
 int message_labao_set_num_mean(struct smessage *message);
@@ -278,7 +283,8 @@ int toggle_ignore_tilt(int argc, char **argv);
 int edit_wfs_results_num(int argc, char **argv);
 int start_autoalign_lab_dichroic(int argc, char **argv);
 int start_autoalign_scope_dichroic(int argc, char **argv);
-int stop_autoalign_dichroic(int argc, char **argv);
+int start_autoalign_zernike(int argc, char **argv);
+int stop_autoalign(int argc, char **argv);
 int edit_servo_parameters(int argc, char **argv);
 int move_boxes(int argc, char **argv);
 int edit_zero_clamp(int argc, char **argv);
@@ -290,5 +296,6 @@ int call_zero_aberrations(int argc, char **argv);
 int call_add_wfs_aberration(int argc, char **argv);
 int toggle_use_reference(int argc, char **argv);
 int set_reference_now(int argc, char **argv);
+int toggle_use_servo_flat(int argc, char **argv);
 
 #endif

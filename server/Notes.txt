@@ -61,3 +61,25 @@ Aberrations 001 - On flat mirror with flat.
 004 on corner cube with flat defined by corner cube.
 005 On corner cube with all defaults.
 006 Same, software test
+
+2015_05_08
+----------
+
+Seems moving by 0.005 is a good incriment on zernikes
+
+Zernike 1 +ve focus goes more negative
+Zernike 5 increase A2 goes more negative
+Zernike 6 increase A1 goes more positive
+
+It would be nice to add a scope on the astigmatism and focus terms
+
+Automate this proceedure.
+
+Found decent Zernike Positions
+
+Z1 = 0.6800
+Z5 = -0.0060
+Z6 = 0.0200
+
+In TR98 add step 7b repeat to ensure iris is in beam size
+Check that we mention the S2WFS shutter

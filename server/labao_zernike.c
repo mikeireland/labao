@@ -609,6 +609,6 @@ int call_load_zernike(int argc, char **argv)
 		return error(ERROR,"Failed to set zernike values.");
 	}
 
-	return NOERROR;
+        return send_labao_value_all_channels(TRUE);
 
 } /* call_load_zernike() */

@@ -64,9 +64,9 @@ void fill_dm_page(GtkWidget *vbox)
 	gtk_container_add (GTK_CONTAINER (vbox), hbox);
 	gtk_widget_show(hbox);
 
-        /* Button to UPDATE */
+        /* Button to UPDATE - Each one should add to 8 or 7 buttons */
 
-        button = gtk_button_new_with_label ("SHOW");
+        button = gtk_button_new_with_label ("  SHOW  ");
         gtk_signal_connect (GTK_OBJECT (button), "clicked",
                 GTK_SIGNAL_FUNC (labao_message_callback),
                 (gpointer)(message_array+LABAO_SHOW_EDAC40));
@@ -107,30 +107,41 @@ void fill_dm_page(GtkWidget *vbox)
 
 	/* Create a bunch of spin buttons */
 
-	label = gtk_label_new("Act/Zern#:");
-        gtk_box_pack_start(GTK_BOX(hbox), label , TRUE, TRUE, 0);
-        gtk_widget_set_usize (label, LABAO_WIDTH/18, LABAO_HEIGHT);
-	gtk_widget_show(label);
-	adjustment = gtk_adjustment_new(1, 1, LABAO_NUM_ACTUATORS, 1, 1, 0);
-	actuator_number_entry = 
-		gtk_spin_button_new((GtkAdjustment *)adjustment,1.0,0);
-        gtk_box_pack_start(GTK_BOX(hbox), 
-		actuator_number_entry, TRUE, TRUE, 0);
-        gtk_widget_set_usize (actuator_number_entry, 
-		LABAO_WIDTH/18, LABAO_HEIGHT);
-	gtk_widget_show(actuator_number_entry);
+	if (engineering_mode)
+	{
+		label = gtk_label_new("Act/Zern#:");
+		gtk_box_pack_start(GTK_BOX(hbox), label , TRUE, TRUE, 0);
+		gtk_widget_set_usize (label, LABAO_WIDTH/18, LABAO_HEIGHT);
+		gtk_widget_show(label);
+		adjustment = gtk_adjustment_new(1,1,LABAO_NUM_ACTUATORS,1,1,0);
+		actuator_number_entry = 
+			gtk_spin_button_new((GtkAdjustment *)adjustment,1.0,0);
+		gtk_box_pack_start(GTK_BOX(hbox), 
+			actuator_number_entry, TRUE, TRUE, 0);
+		gtk_widget_set_usize (actuator_number_entry, 
+			LABAO_WIDTH/18, LABAO_HEIGHT);
+		gtk_widget_show(actuator_number_entry);
 
-	label = gtk_label_new("Value:");
-        gtk_box_pack_start(GTK_BOX(hbox), label , TRUE, TRUE, 0);
-        gtk_widget_set_usize (label, LABAO_WIDTH/18, LABAO_HEIGHT);
-	gtk_widget_show(label);
-	actuator_value_entry = gtk_entry_new ();
-        gtk_entry_set_text (GTK_ENTRY (actuator_value_entry),"0.0");
-        gtk_box_pack_start(GTK_BOX(hbox), 
-		actuator_value_entry, TRUE, TRUE, 0);
-        gtk_widget_set_usize (actuator_value_entry, 
-		LABAO_WIDTH/18, LABAO_HEIGHT);
-	gtk_widget_show(actuator_value_entry);
+		label = gtk_label_new("Value:");
+		gtk_box_pack_start(GTK_BOX(hbox), label , TRUE, TRUE, 0);
+		gtk_widget_set_usize (label, LABAO_WIDTH/18, LABAO_HEIGHT);
+		gtk_widget_show(label);
+		actuator_value_entry = gtk_entry_new ();
+		gtk_entry_set_text (GTK_ENTRY (actuator_value_entry),"0.0");
+		gtk_box_pack_start(GTK_BOX(hbox), 
+			actuator_value_entry, TRUE, TRUE, 0);
+		gtk_widget_set_usize (actuator_value_entry, 
+			LABAO_WIDTH/18, LABAO_HEIGHT);
+		gtk_widget_show(actuator_value_entry);
+	}
+	else
+	{
+		label = gtk_label_new("");
+		gtk_box_pack_start(GTK_BOX(hbox), label , TRUE, TRUE, 0);
+		gtk_widget_set_usize (label, LABAO_WIDTH/9, LABAO_HEIGHT);
+		gtk_widget_show(label);
+
+	}
 
 	/* Second row of actuator position labels */
 
@@ -138,7 +149,7 @@ void fill_dm_page(GtkWidget *vbox)
 	gtk_container_add (GTK_CONTAINER (vbox), hbox);
 	gtk_widget_show(hbox);
 
-        button = gtk_button_new_with_label ("FOC+");
+        button = gtk_button_new_with_label ("  FOC+  ");
         gtk_signal_connect (GTK_OBJECT (button), "clicked",
                 GTK_SIGNAL_FUNC (edac40_add), (gpointer)(&foc_plus));
         gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
@@ -173,23 +184,33 @@ void fill_dm_page(GtkWidget *vbox)
 
         /* Button to SET ZERNIKE */
 
-        button = gtk_button_new_with_label ("SET/ZERN");
-        gtk_signal_connect (GTK_OBJECT (button), "clicked",
-                GTK_SIGNAL_FUNC (set_zernike_callback),NULL);
-        gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
-        gtk_container_set_border_width (GTK_CONTAINER(button),1);
-        gtk_widget_set_usize (button, LABAO_WIDTH/9, LABAO_HEIGHT);
-        gtk_widget_show(button);
+	if (engineering_mode)
+	{
+		button = gtk_button_new_with_label ("SET/ZERN");
+		gtk_signal_connect (GTK_OBJECT (button), "clicked",
+			GTK_SIGNAL_FUNC (set_zernike_callback),NULL);
+		gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
+		gtk_container_set_border_width (GTK_CONTAINER(button),1);
+		gtk_widget_set_usize (button, LABAO_WIDTH/9, LABAO_HEIGHT);
+		gtk_widget_show(button);
 
-        /* Button to SET SINGLE */
+		/* Button to SET SINGLE */
 
-        button = gtk_button_new_with_label ("SET/ACT");
-        gtk_signal_connect (GTK_OBJECT (button), "clicked",
-                GTK_SIGNAL_FUNC (set_channel_callback),NULL);
-        gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
-        gtk_container_set_border_width (GTK_CONTAINER(button),1);
-        gtk_widget_set_usize (button, LABAO_WIDTH/9, LABAO_HEIGHT);
-        gtk_widget_show(button);
+		button = gtk_button_new_with_label ("SET/ACT ");
+		gtk_signal_connect (GTK_OBJECT (button), "clicked",
+			GTK_SIGNAL_FUNC (set_channel_callback),NULL);
+		gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
+		gtk_container_set_border_width (GTK_CONTAINER(button),1);
+		gtk_widget_set_usize (button, LABAO_WIDTH/9, LABAO_HEIGHT);
+		gtk_widget_show(button);
+	}
+	else
+	{
+		label = gtk_label_new("");
+		gtk_box_pack_start(GTK_BOX(hbox), label , TRUE, TRUE, 0);
+		gtk_widget_set_usize (label, LABAO_WIDTH/9, LABAO_HEIGHT);
+		gtk_widget_show(label);
+	}
 
 	/* Third row of actuator position labels */
 
@@ -239,13 +260,16 @@ void fill_dm_page(GtkWidget *vbox)
 
         /* Button to DELTA SINGLE */
 
-        button = gtk_button_new_with_label ("INC/ACT");
-        gtk_signal_connect (GTK_OBJECT (button), "clicked",
-                GTK_SIGNAL_FUNC (delta_channel_callback),NULL);
-        gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
-        gtk_container_set_border_width (GTK_CONTAINER(button),1);
-        gtk_widget_set_usize (button, LABAO_WIDTH/9, LABAO_HEIGHT);
-        gtk_widget_show(button);
+	if (engineering_mode)
+	{
+		button = gtk_button_new_with_label ("INC/ACT ");
+		gtk_signal_connect (GTK_OBJECT (button), "clicked",
+			GTK_SIGNAL_FUNC (delta_channel_callback),NULL);
+		gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
+		gtk_container_set_border_width (GTK_CONTAINER(button),1);
+		gtk_widget_set_usize (button, LABAO_WIDTH/9, LABAO_HEIGHT);
+		gtk_widget_show(button);
+	}
 
 	/* Fourth row of actuator position labels */
 
@@ -290,14 +314,17 @@ void fill_dm_page(GtkWidget *vbox)
 
         /* Button to UPDATE */
 
-        button = gtk_button_new_with_label (" UPDATE ");
-        gtk_signal_connect (GTK_OBJECT (button), "clicked",
-                GTK_SIGNAL_FUNC (labao_message_callback),
-                (gpointer)(message_array+LABAO_VALUE_ALL_CHANNELS));
-        gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
-        gtk_container_set_border_width (GTK_CONTAINER(button),1);
-        gtk_widget_set_usize (button, LABAO_WIDTH/9, LABAO_HEIGHT);
-        gtk_widget_show(button);
+	if (engineering_mode)
+	{
+		button = gtk_button_new_with_label (" UPDATE ");
+		gtk_signal_connect (GTK_OBJECT (button), "clicked",
+			GTK_SIGNAL_FUNC (labao_message_callback),
+			(gpointer)(message_array+LABAO_VALUE_ALL_CHANNELS));
+		gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
+		gtk_container_set_border_width (GTK_CONTAINER(button),1);
+		gtk_widget_set_usize (button, LABAO_WIDTH/9, LABAO_HEIGHT);
+		gtk_widget_show(button);
+	}
 
 	/* Fifth row of actuator position labels */
 
@@ -347,13 +374,16 @@ void fill_dm_page(GtkWidget *vbox)
 
         /* Button to SET ALL */
 
-        button = gtk_button_new_with_label ("SET/ALL");
-        gtk_signal_connect (GTK_OBJECT (button), "clicked",
-                GTK_SIGNAL_FUNC (set_all_callback),NULL);
-        gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
-        gtk_container_set_border_width (GTK_CONTAINER(button),1);
-        gtk_widget_set_usize (button, LABAO_WIDTH/9, LABAO_HEIGHT);
-        gtk_widget_show(button);
+	if (engineering_mode)
+	{
+		button = gtk_button_new_with_label ("SET/ALL ");
+		gtk_signal_connect (GTK_OBJECT (button), "clicked",
+			GTK_SIGNAL_FUNC (set_all_callback),NULL);
+		gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
+		gtk_container_set_border_width (GTK_CONTAINER(button),1);
+		gtk_widget_set_usize (button, LABAO_WIDTH/9, LABAO_HEIGHT);
+		gtk_widget_show(button);
+	}
 
 	/* Sixth row of actuator position labels */
 
@@ -361,7 +391,7 @@ void fill_dm_page(GtkWidget *vbox)
 	gtk_container_add (GTK_CONTAINER (vbox), hbox);
 	gtk_widget_show(hbox);
 
-        button = gtk_button_new_with_label ("FOC-");
+        button = gtk_button_new_with_label ("  FOC-  ");
         gtk_signal_connect (GTK_OBJECT (button), "clicked",
                 GTK_SIGNAL_FUNC (edac40_add), (gpointer)(&foc_minus));
         gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
@@ -396,23 +426,34 @@ void fill_dm_page(GtkWidget *vbox)
 
         /* Button to INC ZERNIKE */
 
-        button = gtk_button_new_with_label ("INC/ZERN");
-        gtk_signal_connect (GTK_OBJECT (button), "clicked",
-                GTK_SIGNAL_FUNC (inc_zernike_callback),NULL);
-        gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
-        gtk_container_set_border_width (GTK_CONTAINER(button),1);
-        gtk_widget_set_usize (button, LABAO_WIDTH/9, LABAO_HEIGHT);
-        gtk_widget_show(button);
+	if (engineering_mode)
+	{
+		button = gtk_button_new_with_label ("INC/ZERN");
+		gtk_signal_connect (GTK_OBJECT (button), "clicked",
+			GTK_SIGNAL_FUNC (inc_zernike_callback),NULL);
+		gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
+		gtk_container_set_border_width (GTK_CONTAINER(button),1);
+		gtk_widget_set_usize (button, LABAO_WIDTH/9, LABAO_HEIGHT);
+		gtk_widget_show(button);
 
-        /* Button to DELTA ALL */
+		/* Button to DELTA ALL */
 
-        button = gtk_button_new_with_label ("INC/ALL");
-        gtk_signal_connect (GTK_OBJECT (button), "clicked",
-                GTK_SIGNAL_FUNC (delta_all_callback),NULL);
-        gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
-        gtk_container_set_border_width (GTK_CONTAINER(button),1);
-        gtk_widget_set_usize (button, LABAO_WIDTH/9, LABAO_HEIGHT);
-        gtk_widget_show(button);
+			button = gtk_button_new_with_label ("INC/ALL ");
+		gtk_signal_connect (GTK_OBJECT (button), "clicked",
+			GTK_SIGNAL_FUNC (delta_all_callback),NULL);
+		gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
+		gtk_container_set_border_width (GTK_CONTAINER(button),1);
+		gtk_widget_set_usize (button, LABAO_WIDTH/9, LABAO_HEIGHT);
+		gtk_widget_show(button);
+	}
+	else
+	{
+		label = gtk_label_new("");
+		gtk_box_pack_start(GTK_BOX(hbox), label , TRUE, TRUE, 0);
+		gtk_widget_set_usize (label, LABAO_WIDTH/9, LABAO_HEIGHT);
+		gtk_widget_show(label);
+	}
+
 
 	/* Seventh and last row of actuator position labels */
 
@@ -420,7 +461,7 @@ void fill_dm_page(GtkWidget *vbox)
 	gtk_container_add (GTK_CONTAINER (vbox), hbox);
 	gtk_widget_show(hbox);
 
-        button = gtk_button_new_with_label ("STOP");
+        button = gtk_button_new_with_label ("  STOP  ");
 	gtk_signal_connect (GTK_OBJECT (button), "clicked",
                 GTK_SIGNAL_FUNC (labao_signal_callback), 
                 (gpointer)(signal_array+LABAO_SIGNAL_EXIT));
@@ -459,27 +500,40 @@ void fill_dm_page(GtkWidget *vbox)
         gtk_widget_set_usize (label, LABAO_WIDTH/18, LABAO_HEIGHT);
 	gtk_widget_show(label);
 
-        /* Button to OPEN/CLOSE EDAC */
+	if (engineering_mode)
+	{
+		/* Button to OPEN/CLOSE EDAC */
 
-        button = gtk_button_new_with_label ("OPEN/DM");
-        gtk_signal_connect (GTK_OBJECT (button), "clicked",
-                GTK_SIGNAL_FUNC (labao_message_callback),
-                (gpointer)(message_array+LABAO_OPEN_EDAC40));
-        gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
-        gtk_container_set_border_width (GTK_CONTAINER(button),1);
-        gtk_widget_set_usize (button, LABAO_WIDTH/9, LABAO_HEIGHT);
-        gtk_widget_show(button);
+		button = gtk_button_new_with_label ("OPEN/DM ");
+		gtk_signal_connect (GTK_OBJECT (button), "clicked",
+			GTK_SIGNAL_FUNC (labao_message_callback),
+			(gpointer)(message_array+LABAO_OPEN_EDAC40));
+		gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
+		gtk_container_set_border_width (GTK_CONTAINER(button),1);
+		gtk_widget_set_usize (button, LABAO_WIDTH/9, LABAO_HEIGHT);
+		gtk_widget_show(button);
 
-        button = gtk_button_new_with_label ("CLOSE/DM");
-        gtk_signal_connect (GTK_OBJECT (button), "clicked",
-                GTK_SIGNAL_FUNC (labao_message_callback),
-                (gpointer)(message_array+LABAO_CLOSE_EDAC40));
-        gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
-        gtk_container_set_border_width (GTK_CONTAINER(button),1);
-        gtk_widget_set_usize (button, LABAO_WIDTH/9, LABAO_HEIGHT);
-        gtk_widget_show(button);
+		button = gtk_button_new_with_label ("CLOSE/DM");
+		gtk_signal_connect (GTK_OBJECT (button), "clicked",
+			GTK_SIGNAL_FUNC (labao_message_callback),
+			(gpointer)(message_array+LABAO_CLOSE_EDAC40));
+		gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
+		gtk_container_set_border_width (GTK_CONTAINER(button),1);
+		gtk_widget_set_usize (button, LABAO_WIDTH/9, LABAO_HEIGHT);
+		gtk_widget_show(button);
+	}
+	else
+	{
+		button = gtk_button_new_with_label (" UPDATE ");
+		gtk_signal_connect (GTK_OBJECT (button), "clicked",
+			GTK_SIGNAL_FUNC (labao_message_callback),
+			(gpointer)(message_array+LABAO_VALUE_ALL_CHANNELS));
+		gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
+		gtk_container_set_border_width (GTK_CONTAINER(button),1);
+		gtk_widget_set_usize (button, LABAO_WIDTH/9, LABAO_HEIGHT);
+		gtk_widget_show(button);
+	}
 
-	/* Fifth row of actuator position labels */
 } /* fill_dm_page() */
 
 /************************************************************************/
@@ -492,9 +546,6 @@ void update_dm_page(float *values)
 {
 	int	i;
 	char	s[10];
-
-#warning We are bypassing engineering mode for now.
-	//if (!engineering_mode) return;
 
 	for(i=1; i<= LABAO_NUM_ACTUATORS; i++)
 	{

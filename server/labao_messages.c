@@ -100,6 +100,8 @@ void setup_standard_labao_messages(void)
 		message_labao_start_autoalign_lab);
         ui_add_message_job(LABAO_START_AUTOALIGN_SCOPE, 
 		message_labao_start_autoalign_scope);
+        ui_add_message_job(LABAO_START_AUTOALIGN_ZERNIKE, 
+		message_labao_start_autoalign_zernike);
         ui_add_message_job(LABAO_STOP_AUTOALIGN, message_labao_stop_autoalign);
         ui_add_message_job(LABAO_EDAC40_ADD, message_labao_edac40_add);
         ui_add_message_job(LABAO_SAVE_ABERRATIONS, 
@@ -403,6 +405,32 @@ int message_labao_start_autoalign_scope(struct smessage *message)
 } /* message_labao_start_autoalign_scope() */
 
 /************************************************************************/
+/* message_labao_start_autoalign_zernike()                              */
+/*                                                                      */
+/************************************************************************/
+
+int message_labao_start_autoalign_zernike(struct smessage *message)
+{
+	char	*args[2];
+	char	argv1[30];
+	int	tries;
+
+	if (message->length != sizeof(int))
+    		return error(ERROR,
+			"Got LABAO_START_AUTOALIGN_ZERNIKE with wrong data.");
+
+	tries = *((int *)message->data);
+
+	sprintf(argv1,"%d", tries);
+
+	args[0] = "zdich";
+	args[1] = argv1;
+
+	return start_autoalign_zernike(2, args);
+
+} /* message_labao_start_autoalign_zernike() */
+
+/************************************************************************/
 /* message_labao_stop_autoalign()                                       */
 /*                                                                      */
 /************************************************************************/
@@ -412,12 +440,12 @@ int message_labao_stop_autoalign(struct smessage *message)
 	if (message->length != 0)
 		return error(ERROR,"Got LABAO_STOP_AUTOALIGN with wrong data.");
 
-	return stop_autoalign_dichroic(0, NULL);
+	return stop_autoalign(0, NULL);
 
 } /* message_labao_stop_autoalign() */
 
 /************************************************************************/
-/* message_labao_edac40_add()                                       */
+/* message_labao_edac40_add()	                                        */
 /*                                                                      */
 /************************************************************************/
 
