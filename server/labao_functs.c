@@ -100,6 +100,7 @@ struct {
 		{"savecube",	save_fits_cube},
 		{"exptime",     call_usb_camera_set_exptime},
 		{"tbox",	toggle_overlay_boxes},
+		{"nframe",	call_set_num_sum_frame},
 
 		/* Function set for finite state machine */
 

@@ -121,5 +121,6 @@ void labao_autoalign_lab_callback(GtkButton *button, gpointer data);
 void labao_autoalign_scope_callback(GtkButton *button, gpointer data);
 void labao_autoalign_zernike_callback(GtkButton *button, gpointer data);
 void labao_num_mean_callback(GtkButton *button, gpointer data);
+void labao_set_fps_callback(GtkButton *button, gpointer data);
 void labao_save_aberrations_callback(GtkButton *button, gpointer data);
 void labao_save_data_callback(GtkButton *button, gpointer data);

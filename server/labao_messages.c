@@ -45,7 +45,7 @@ void setup_standard_labao_messages(void)
 			message_labao_delta_all_channels);
         ui_add_message_job(LABAO_VALUE_ALL_CHANNELS, 
 			message_labao_value_all_channels);
-        ui_add_message_job(LABAO_LOAD_DEFAULTS, message_labao_run_function);
+        ui_add_message_job(LABAO_LOAD_DEFAULTS, message_labao_load_defaults);
         ui_add_message_job(LABAO_GET_USB_CAMERA, message_labao_get_usb_camera);
         ui_add_message_job(LABAO_SET_ZERNIKE, message_labao_set_zernike);
         ui_add_message_job(LABAO_INC_ZERNIKE, message_labao_inc_zernike);
@@ -63,8 +63,7 @@ void setup_standard_labao_messages(void)
 		message_labao_run_function);
         ui_add_message_job(LABAO_CREATE_DARK, 
 		message_labao_run_function);
-	ui_add_message_job(LABAO_SAVE_DEFAULTS,
-		message_labao_run_function);
+	ui_add_message_job(LABAO_SAVE_DEFAULTS, message_labao_save_defaults);
 	ui_add_message_job(LABAO_LOAD_RECONSTRUCTOR,
 		message_labao_run_function);
 	ui_add_message_job(LABAO_SAVE_ACTUATOR_TO_SENSOR,
@@ -110,6 +109,11 @@ void setup_standard_labao_messages(void)
         ui_add_message_job(LABAO_SAVE_DATA, message_labao_save_data);
         ui_add_message_job(LABAO_REOPEN_TELESCOPE, 
 		message_labao_reopen_telescope);
+        ui_add_message_job(LABAO_ADD_WFS_ABERRATION, 
+		message_labao_add_wfs_aberration);
+        ui_add_message_job(LABAO_ZERO_WFS_ABERRATION, 
+		message_labao_zero_wfs_aberration);
+        ui_add_message_job(LABAO_SET_FPS, message_labao_set_fps);
 
 } /* setup_standard_labao_messages() */
 
@@ -458,7 +462,16 @@ int message_labao_edac40_add(struct smessage *message)
 
 	add = *((float *)message->data);
 
-	if (edac40_add_all_channels(add) != 0) return ERROR;
+	/* We either lie to the servo or move the mirror itself. */
+
+	if (fsm_state == FSM_SERVO_LOOP)
+	{
+		return add_wfs_aberration(4, add);
+	}
+	else
+	{
+		return edac40_add_all_channels(add);
+	}
 
 	return NOERROR;
 
@@ -550,3 +563,95 @@ int message_labao_save_data(struct smessage *message)
 	return save_fits_cube(2, args);
 
 } /* message_labao_save_data() */
+
+/************************************************************************/
+/* message_labao_add_wfs_aberration()                                   */
+/*                                                                      */
+/************************************************************************/
+
+int message_labao_add_wfs_aberration(struct smessage *message)
+{
+	struct s_labao_eda40_set_channel *data;
+
+	if (message->length != sizeof(*data))
+		return error(ERROR,"LABAO_ADD_WFS_ABERRATION with wrong data");
+
+	data = (struct s_labao_eda40_set_channel *)(message->data);
+
+	if (add_wfs_aberration(data->channel, data->value) != NOERROR)
+		return error(ERROR,"Zernike number or value is out of range.");
+	else
+		return NOERROR;
+
+} /* message_labao_add_wfs_aberration() */
+
+/************************************************************************/
+/* message_labao_zero_wfs_aberration()                                   */
+/*                                                                      */
+/************************************************************************/
+
+int message_labao_zero_wfs_aberration(struct smessage *message)
+{
+	struct s_labao_eda40_set_channel *data;
+
+	if (message->length != 0)
+		return error(ERROR,"LABAO_ZERO_WFS_ABERRATION with wrong data");
+
+	return call_zero_aberrations(0, NULL);
+
+} /* message_labao_zero_wfs_aberration() */
+
+/************************************************************************/
+/* message_labao_set_fps() 		                                */
+/*                                                                      */
+/************************************************************************/
+
+int message_labao_set_fps(struct smessage *message)
+{
+	float *fps;
+
+	if (message->length != sizeof(float))
+		return error(ERROR,"LABAO_SET_FPS with wrong data");
+
+	fps = (float *)(message->data);
+
+	if (set_frame_rate(*fps) < 0)
+		return ERROR;
+	else
+		return NOERROR;
+
+} /* message_labao_set_fps() */
+
+/************************************************************************/
+/* message_labao_load_defaults()	                                */
+/*                                                                      */
+/************************************************************************/
+
+int message_labao_load_defaults(struct smessage *message)
+{
+	char	*args[2];
+
+	if (message->length == 0) return call_load_defaults(0, NULL);
+
+	args[0] = "loaddef";
+	args[1] = (char *)(message->data);
+	return call_load_defaults(2, args);
+
+} /* message_labao_load_defaults() */
+
+/************************************************************************/
+/* message_labao_save_defaults()	                                */
+/*                                                                      */
+/************************************************************************/
+
+int message_labao_save_defaults(struct smessage *message)
+{
+	char	*args[2];
+
+	if (message->length == 0) return call_save_defaults(0, NULL);
+
+	args[0] = "savedef";
+	args[1] = (char *)(message->data);
+	return call_save_defaults(2, args);
+
+} /* message_labao_save_defaults() */

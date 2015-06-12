@@ -35,6 +35,7 @@
 
 static GtkWidget *tries_entry;
 static GtkWidget *num_entry;
+static GtkWidget *fps_entry;
 
 /************************************************************************/
 /* fill_wfs_page()							*/
@@ -352,13 +353,13 @@ void fill_wfs_page(GtkWidget *vbox)
                 GTK_SIGNAL_FUNC (labao_num_mean_callback), NULL);
         gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
         gtk_container_set_border_width (GTK_CONTAINER(button),1);
-        gtk_widget_set_usize (button, LABAO_WIDTH/8, LABAO_HEIGHT);
+        gtk_widget_set_usize (button, LABAO_WIDTH/15, LABAO_HEIGHT);
         gtk_widget_show(button);
 
 	num_entry = gtk_entry_new ();
         gtk_entry_set_text (GTK_ENTRY (num_entry),"200");
         gtk_box_pack_start(GTK_BOX(hbox), num_entry, TRUE, TRUE, 0);
-        gtk_widget_set_usize (num_entry, LABAO_WIDTH/11, LABAO_HEIGHT);
+        gtk_widget_set_usize (num_entry, LABAO_WIDTH/10, LABAO_HEIGHT);
         gtk_widget_show(num_entry);
 
         button = gtk_button_new_with_label ("SAVE ABERR");
@@ -366,7 +367,7 @@ void fill_wfs_page(GtkWidget *vbox)
                 GTK_SIGNAL_FUNC (labao_save_aberrations_callback), NULL);
         gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
         gtk_container_set_border_width (GTK_CONTAINER(button),1);
-        gtk_widget_set_usize (button, LABAO_WIDTH/4, LABAO_HEIGHT);
+        gtk_widget_set_usize (button, LABAO_WIDTH/5, LABAO_HEIGHT);
         gtk_widget_show(button);
 
         button = gtk_button_new_with_label ("SAVE DATA");
@@ -374,7 +375,7 @@ void fill_wfs_page(GtkWidget *vbox)
                 GTK_SIGNAL_FUNC (labao_save_data_callback), NULL);
         gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
         gtk_container_set_border_width (GTK_CONTAINER(button),1);
-        gtk_widget_set_usize (button, LABAO_WIDTH/4, LABAO_HEIGHT);
+        gtk_widget_set_usize (button, LABAO_WIDTH/5, LABAO_HEIGHT);
         gtk_widget_show(button);
 
         button = gtk_button_new_with_label ("PLOT ABER");
@@ -382,8 +383,22 @@ void fill_wfs_page(GtkWidget *vbox)
                 GTK_SIGNAL_FUNC (labao_plot_aber_callback), NULL);
         gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
         gtk_container_set_border_width (GTK_CONTAINER(button),1);
-        gtk_widget_set_usize (button, LABAO_WIDTH/4, LABAO_HEIGHT);
+        gtk_widget_set_usize (button, LABAO_WIDTH/5, LABAO_HEIGHT);
         gtk_widget_show(button);
+
+        button = gtk_button_new_with_label ("FPS");
+	gtk_signal_connect (GTK_OBJECT (button), "clicked",
+                GTK_SIGNAL_FUNC (labao_set_fps_callback), NULL);
+        gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
+        gtk_container_set_border_width (GTK_CONTAINER(button),1);
+        gtk_widget_set_usize (button, LABAO_WIDTH/15, LABAO_HEIGHT);
+        gtk_widget_show(button);
+
+	fps_entry = gtk_entry_new ();
+        gtk_entry_set_text (GTK_ENTRY (fps_entry),"100");
+        gtk_box_pack_start(GTK_BOX(hbox), fps_entry, TRUE, TRUE, 0);
+        gtk_widget_set_usize (fps_entry, LABAO_WIDTH/10, LABAO_HEIGHT);
+        gtk_widget_show(fps_entry);
 
 	/* Seventh row of Buttons */
 
@@ -420,7 +435,7 @@ void fill_wfs_page(GtkWidget *vbox)
 
         button = gtk_button_new_with_label ("ZERNIKE");
 	gtk_signal_connect (GTK_OBJECT (button), "clicked",
-                GTK_SIGNAL_FUNC (labao_autoalign_scope_callback), NULL);
+                GTK_SIGNAL_FUNC (labao_autoalign_zernike_callback), NULL);
         gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
         gtk_container_set_border_width (GTK_CONTAINER(button),1);
         gtk_widget_set_usize (button, LABAO_WIDTH/5, LABAO_HEIGHT);
@@ -544,6 +559,32 @@ void labao_num_mean_callback(GtkButton *button, gpointer data)
         }
 
 } /* labao_num_mean_callback() */
+
+/************************************************************************/
+/* labao_set_fps_callback()						*/
+/*									*/
+/* Set number to use in mean calcualtions.				*/
+/************************************************************************/
+
+void labao_set_fps_callback(GtkButton *button, gpointer data)
+{
+        struct smessage mess;
+	float	fps;
+        char    *entry;
+
+        entry = (char *)gtk_entry_get_text(GTK_ENTRY(fps_entry));
+        sscanf(entry,"%f", &fps);
+
+        mess.type = LABAO_SET_FPS;
+        mess.length = sizeof(float);
+        mess.data = (unsigned char *)&fps;
+
+        if (!send_message(server, &mess))
+        {
+          print_status(ERROR,"Failed to send LABAO_SET_FPS message.\n");
+        }
+
+} /* labao_set_fps_callback() */
 
 /************************************************************************/
 /* labao_save_aberrations_callback()					*/

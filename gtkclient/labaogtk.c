@@ -122,7 +122,7 @@ int main(int  argc, char *argv[] )
 			case 'd': do_local_display = FALSE;
                                  break;
 
-			case 'e': engineering_mode = TRUE;
+			case 'E': engineering_mode = TRUE;
                                  break;
 
 			case 'p': strcpy(host, p+1);
@@ -769,7 +769,7 @@ void print_usage_message(char *name)
         fprintf(stderr,"Flags:\n");
         fprintf(stderr,"-d\t\tTurn off local displays\n");
         fprintf(stderr,"-D[mS]\t\tSet delay in mS between displays (0)\n");
-        fprintf(stderr,"-e\t\tUse engineering mode\n");
+        fprintf(stderr,"-E\t\tUse engineering mode\n");
         fprintf(stderr,"-h\t\tPrint this message\n");
         fprintf(stderr,"-p[host,port]\tSkip socket manager\n");
 

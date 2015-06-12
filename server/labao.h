@@ -165,6 +165,11 @@ int message_labao_set_num_mean(struct smessage *message);
 int message_labao_save_data(struct smessage *message);
 int message_labao_reopen_telescope(struct smessage *message);
 int message_telescope_status(int server, struct smessage *message);
+int message_labao_add_wfs_aberration(struct smessage *message);
+int message_labao_zero_wfs_aberration(struct smessage *message);
+int message_labao_set_fps(struct smessage *message);
+int message_labao_load_defaults(struct smessage *message);
+int message_labao_save_defaults(struct smessage *message);
 void send_labao_text_message(char *fmt, ...);
 
 /* labao_edac40.c */
@@ -246,6 +251,8 @@ int call_usb_camera_set_exptime(int argc, char **argv);
 int toggle_overlay_boxes(int argc, char **argv);
 int send_labao_set_usb_camera(bool send_to_all_clients);
 bool usb_cammera_is_running(void);
+int set_num_sum_frame(int num);
+int call_set_num_sum_frame(int argc, char **argv);
 
 /* labso_fsm.c */
 
@@ -293,6 +300,7 @@ int message_labao_save_aberrations(struct smessage *message);
 void complete_aberrations_record(void);
 void compute_pupil_center(void);
 int call_zero_aberrations(int argc, char **argv);
+int add_wfs_aberration(int zernike, float amplitude);
 int call_add_wfs_aberration(int argc, char **argv);
 int toggle_use_reference(int argc, char **argv);
 int set_reference_now(int argc, char **argv);

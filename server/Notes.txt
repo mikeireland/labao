@@ -83,3 +83,7 @@ Z6 = 0.0200
 
 In TR98 add step 7b repeat to ensure iris is in beam size
 Check that we mention the S2WFS shutter
+ 
+2015_06_09 Need to be able to change which file we use for defaults. IE change
+between White light, laser and Blue LED zero points. PErhaps this can be done
+on the fly?

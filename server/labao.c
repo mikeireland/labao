@@ -14,6 +14,8 @@
 /* 4.1 - Some small corrections after testing 2014_10_01		*/
 /* 4.2 - Added offsets for reference beam focus etc. 2015 02 02		*/
 /* 4.3 - Recompiled for Centos 7 and doesn't try to close USB cam.	*/
+/* 4.4 - Added new servo type, and averaging for flats.			*/
+/* 4.5 - Frame summing added						*/
 /************************************************************************/
 /*                                                                      */
 /*                    CHARA ARRAY USER INTERFACE			*/
@@ -45,7 +47,7 @@ char title[100];
 char labao_name[80];
 char default_display[256];
 char *dac40_mac_address[NUM_SCOPES] =
-		{"Undefined", /* S1 */
+		{"00-1E-C0-BB-6F-BF", /* S1 */
 		 "00-04-A3-13-DA-90", /* S2 */
 		 "Undefined", /* E1 */
 		 "Undefined", /* E2 */
@@ -145,7 +147,7 @@ int main(int argc, char **argv)
 	ui_clear_screen();
 	put_line("");
 
-	sprintf(title,"%s 4.3",labao_name);
+	sprintf(title,"%s 4.5",labao_name);
 	center_line(title);
 	put_line("");
 	center_line("The CHARA Array");

@@ -465,14 +465,17 @@ int call_load_defaults(int argc, char **argv)
 		
 		case -7: return error(ERROR,"Failed to get interpret positions for flat wavefront.");
 
-		case -8: return error(ERROR,"Failed to send a flat wavefront to the DM.");
+		case -8: return error(ERROR,"Offsets too close to edge.");
+
+		case -9: return error(ERROR,"Failed to send flat to DM.");
 
 		case -10: return error(ERROR,"Failed to read center position.");
 
 		case -11: return error(ERROR,"Failed to read reference position.");
 
 		default: return error(ERROR,
-				"Unknown problem with loading defaults.");
+				"Unknown problem with loading defaults (%d).",
+				retval);
 	}
 
 	return NOERROR;
@@ -880,6 +883,7 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 			new_xc[l] = 0.0;
 			new_yc[l] = 0.0;
 		}
+
 	}
 
 	/* Reset the integral if needed */
@@ -1099,8 +1103,8 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 		      for (l=0;l<NUM_LENSLETS;l++)
 		      {
 			fsm_dm_offset[i] -= 
-			 fsm_reconstructor[i][l]*(new_xc[l]
-				- xtilt + aberration_xc[l]);
+			 fsm_reconstructor[i][l]*(new_xc[l] - xtilt + 
+				aberration_xc[l]);
 			fsm_dm_offset[i] -= 
 			  fsm_reconstructor[i][NUM_LENSLETS+l] *
 				(new_yc[l] - ytilt + aberration_yc[l]);
@@ -1250,6 +1254,7 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 	focus /= (float)NUM_LENSLETS;
 	a1 /= (float)NUM_LENSLETS;
 	a2 /= (float)NUM_LENSLETS;
+
 	if (total_flux > ZERO_CLAMP)
 	{
 		xpos /= total_flux;
@@ -2656,12 +2661,18 @@ void complete_aberrations_record(void)
 int call_zero_aberrations(int argc, char **argv)
 {
 	int i;
+
 	for (i=0;i<NUM_LENSLETS;i++)
 	{
 		aberration_xc[i]=0.0;
 		aberration_yc[i]=0.0;
 	}
 	
+	message(system_window, "Zeroed aberrrations.");
+	send_labao_text_message("Zeroed aberrrations.");
+
+	return NOERROR;
+
 } /* call_zero_aberrations() */
 
 /************************************************************************/
@@ -2672,60 +2683,127 @@ int call_zero_aberrations(int argc, char **argv)
 
 int call_add_wfs_aberration(int argc, char **argv)
 {
-	int i, zernike=0;
+	int zernike=0;
 	float amplitude=0.0;
-	if (argc < 3) return error(ERROR, "Usage: addab zernike amplitude");
+	char	s[80];
 	
         /* Check out the command line */
-	sscanf(argv[1],"%d",&zernike);
-        sscanf(argv[2],"%f",&amplitude);
-        
+
+        if (argc > 1)
+        {
+                sscanf(argv[1],"%d",&zernike);
+        }
+        else
+        {
+                clean_command_line();
+                sprintf(s,"%9d", 1);
+                if (quick_edit("Zernike term to change",s,s,NULL,INTEGER)
+                   == KEY_ESC) return NOERROR;
+                sscanf(s,"%d",&zernike);
+        }
+
+        if (argc > 2)
+        {
+                sscanf(argv[2],"%f",&amplitude);
+        }
+        else
+        {
+                clean_command_line();
+                sprintf(s,"%9f", 0.0);
+                if (quick_edit("AMplitude of change",s,s,NULL,FLOAT)
+                   == KEY_ESC) return NOERROR;
+                sscanf(s,"%f",&amplitude);
+        }
+
+	return add_wfs_aberration(zernike, amplitude);
+
+} /* call_add_wfs_aberration() */
+
+/************************************************************************/
+/* add_wfs_aberration()							*/
+/*									*/
+/* Add a low-order Zernike term to the aberration.			*/
+/* Returns error level.							*/
+/************************************************************************/
+
+int add_wfs_aberration(int zernike, float amplitude)
+{
+	int	i;
+
+#warning Have a close look at the normalization of this compared to calculation
 	switch (zernike)
 	{
-		/* We start with tilt... */
-		case 0:
-		case 1:
-			return error(ERROR, "WFS can't measure piston. zernikes start at 2");	
-		case 2:
+	    case 0:
+	    case 1:
+			return error(ERROR, 
+			   "WFS can't measure piston. zernikes start at 2");	
+	    case 2:
+		for (i=0;i<NUM_LENSLETS;i++)
+		{
+		    aberration_xc[i] += (amplitude * CENTROID_BOX_WIDTH/2.0);
+		}
+		break;
+
+	    case 3:
+		for (i=0;i<NUM_LENSLETS;i++)
+		{
+		    aberration_yc[i] += (amplitude * CENTROID_BOX_WIDTH/2.0);
+		}
+		break;
+
+	    case 4: /* Focus */
+		for (i=0;i<NUM_LENSLETS;i++)
+		{
+		    /* The 0.778 ensures we get the right amount */
+
+		    aberration_xc[i] += amplitude *
+			(x_centroid_offsets[i] - x_mean_offset)/
+				(0.778*max_offset);
+		    aberration_yc[i] += amplitude *
+			(y_centroid_offsets[i] - y_mean_offset)/
+				(0.778*max_offset);
+		}
+		break;
+
+	    case 5: /* a1 (first astigmatism) term */
 			for (i=0;i<NUM_LENSLETS;i++)
-			{
-				aberration_xc[i]+=amplitude;
-			}
-			break;
-		case 3:
-			for (i=0;i<NUM_LENSLETS;i++)
-			{
-				aberration_yc[i]+=amplitude;
-			}
-			break;
-		case 4: /* Focus */
-			for (i=0;i<NUM_LENSLETS;i++)
-			{
-				aberration_xc[i]+=amplitude*(x_centroid_offsets[i] - x_mean_offset)/max_offset;
-				aberration_yc[i]+=amplitude*(y_centroid_offsets[i] - y_mean_offset)/max_offset;
-			}
-			break;
-		case 5: /* a1 (first astigmatism) term */
-			for (i=0;i<NUM_LENSLETS;i++)
-			{
-				aberration_xc[i]+=amplitude*(x_centroid_offsets[i] - x_mean_offset)/max_offset;
-				aberration_yc[i]-=amplitude*(y_centroid_offsets[i] - y_mean_offset)/max_offset;
-			}
-			break;
-		case 6: /* a2 (second astigmatism) term */
-			for (i=0;i<NUM_LENSLETS;i++)
-			{
-				aberration_xc[i]+=amplitude*(y_centroid_offsets[i] - y_mean_offset)/max_offset;
-				aberration_yc[i]+=amplitude*(x_centroid_offsets[i] - x_mean_offset)/max_offset;
-			}
-			break;
-		default:
+		{
+		    aberration_xc[i] += amplitude *
+			(x_centroid_offsets[i] - x_mean_offset)/
+				(0.778*max_offset);
+		    aberration_yc[i] -= amplitude *
+			(y_centroid_offsets[i] - y_mean_offset)/
+				(0.778*max_offset);
+		}
+		break;
+
+	    case 6: /* a2 (second astigmatism) term */
+		for (i=0;i<NUM_LENSLETS;i++)
+		{
+		    aberration_xc[i] += amplitude *
+			(y_centroid_offsets[i] - y_mean_offset)/
+				(0.778*max_offset);
+		    aberration_yc[i] += amplitude *
+			(x_centroid_offsets[i] - x_mean_offset)/
+				(0.778*max_offset);
+		}
+		break;
+
+	    default:
 			return error(ERROR, "Zernike term out of range!");		
 
 	}
+
+	message(system_window, 
+			"Added Zernike %d magnitude %.3f to aberrrations.",
+			zernike, amplitude);
+	send_labao_text_message(
+			"Added Zernike %d magnitude %.3f to aberrrations.",
+			zernike, amplitude);
+
 	return NOERROR;
 
-} /* call_add_wfs_aberration() */
+} /* add_wfs_aberration() */
 
 /************************************************************************/
 /* toggle_use_reference()						*/

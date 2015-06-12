@@ -31,7 +31,7 @@
 
 /* How many frames do we need in the ring buffer? */
 
-#define NUM_IMAGE_MEM 	5
+#define NUM_IMAGE_MEM 	50
 #define USB_DISP_X	640
 #define USB_DISP_Y	512
 #define MAX_FILE_NUMBER	999
@@ -42,6 +42,10 @@ static char fits_filename[2000];
 static bool save_fits_file = FALSE;
 static float **data_frames[NUM_IMAGE_MEM];
 static float **dark;
+static float **sum_frame;
+static float **this_frame;
+static int num_sum_frame = 1;
+static int count_sum_frame = 0;
 static int current_data_frame_ix=0;
 static UEYE_CAMERA_LIST *cam_list;
 static HIDS	cam_pointer;
@@ -167,6 +171,8 @@ int open_usb_camera(void)
 		data_frames[i] = 
 			matrix(1, cam_info.nMaxWidth, 1, cam_info.nMaxHeight);
 	dark = matrix(1, cam_info.nMaxWidth, 1, cam_info.nMaxHeight);
+	sum_frame = matrix(1, cam_info.nMaxWidth, 1, cam_info.nMaxHeight);
+	this_frame = matrix(1, cam_info.nMaxWidth, 1, cam_info.nMaxHeight);
 
 	for (i=1;i<=cam_info.nMaxWidth;i++)
 	for (j=1;j<=cam_info.nMaxWidth;j++) dark[i][j]=0.0;
@@ -365,6 +371,8 @@ int close_usb_camera(void)
 			1, cam_info.nMaxHeight);
 
 	free_matrix(dark,1,cam_info.nMaxWidth, 1, cam_info.nMaxHeight);
+	free_matrix(sum_frame,1,cam_info.nMaxWidth, 1, cam_info.nMaxHeight);
+	free_matrix(this_frame,1,cam_info.nMaxWidth, 1, cam_info.nMaxHeight);
 
 	for(j = 0; j< NUM_IMAGE_MEM; j++)
 	{
@@ -399,7 +407,7 @@ int close_usb_camera(void)
 void *do_usb_camera(void *arg)
 {
 	unsigned char *p;
-	unsigned char min_pixels[NUM_MIN];
+	float min_pixels[NUM_MIN];
 	float row_min;
 	int i,j,k,l;
 	static float **data;
@@ -429,64 +437,93 @@ void *do_usb_camera(void *arg)
 			continue;
 		}
 
-		/* We got a frame! */
+                /*
+                 * Transfer the image to the float array, 
+                 * computing values for destriping
+                 */
 
-		usb_camera_num_frames++;
-		
-		/* 
- 		 * Now that the data is transferred, increment the data pointer 
-		 * NB this is inside the mutex.
-		 */
+                for(j =0, p = usb_camera_image; j< rectAOI.s32Height; j++)
+                {
+                        for(k=0;k<NUM_MIN;k++) min_pixels[k]=255;
+                        for(i=0; i< rectAOI.s32Width; i++)
+                        {
+                            if(*p < min_pixels[NUM_MIN-1])
+                            {
 
-		current_data_frame_ix++;
-		current_data_frame_ix = current_data_frame_ix % NUM_IMAGE_MEM;
-		data = data_frames[current_data_frame_ix];
+                                /* 
+                                 * Find the index to insert the 
+                                 * darkpixel value
+                                 */
 
-		/*
-  		 * Transfer the image to the float array, 
-  		 * computing values for destriping
-  		 */
+                                l = 0;
+                                while(min_pixels[l] < *p) l++;
 
-		for(j =0, p = usb_camera_image; j< rectAOI.s32Height; j++)
+                                /* Shift the current values along one */
+
+                                for(k=NUM_MIN-1;k>l;k--)
+                                        min_pixels[k] = min_pixels[k-1];
+
+                                /* Insert the new min pixel */
+
+                                min_pixels[k] = *p;
+                            }
+                            this_frame[i+1][j+1] = (float)*p++;
+                        }
+                        for(;i < cam_info.nMaxWidth; i++) p++;
+
+                        /* If needed, try to destripe */
+
+                        if (usb_camera.destripe)
+                        {
+                                row_min=0;
+                                for (k=0; k<NUM_MIN; k++)
+                                        row_min += (float)min_pixels[k];
+                                row_min /= NUM_MIN;
+                                for (i=1; i<=rectAOI.s32Width;i++)
+                                        this_frame[i][j+1] -= row_min;
+                        }
+                }
+
+		/* Sum this frame in? */
+
+                for(j =1; j <= rectAOI.s32Height; j++)
+                {
+                    for(i=1; i <= rectAOI.s32Width; i++)
+                    {
+			sum_frame[i][j] += this_frame[i][j];
+		    }
+		}
+
+		/* Is that it? */
+
+		if (++count_sum_frame < num_sum_frame)
 		{
-			for(k=0;k<NUM_MIN;k++) min_pixels[k]=255;
-			for(i=0; i< rectAOI.s32Width; i++)
-			{	
-			    if(*p < min_pixels[NUM_MIN-1])
-	   		    { 
-    
-				/* 
-				 * Find the index to insert the 
-				 * darkpixel value
-				 */
+			pthread_mutex_unlock(&usb_camera_mutex);
+			usleep(1000);
+			continue;
+		}
+		
+                /* We got a frame! */
 
-				l = 0;
-				while(min_pixels[l] < *p) l++;
+                usb_camera_num_frames++;
+		count_sum_frame = 0;
 
-				/* Shift the current values along one */
+                /* 
+                 * Now that the data is transferred, increment the data pointer 
+                 * NB this is inside the mutex.
+                 */
 
-				for(k=NUM_MIN-1;k>l;k--)
-					min_pixels[k] = min_pixels[k-1];
+                current_data_frame_ix++;
+                current_data_frame_ix = current_data_frame_ix % NUM_IMAGE_MEM;
+                data = data_frames[current_data_frame_ix];
 
-				/* Insert the new min pixel */
-
-				min_pixels[k] = *p;
-			    }
-			    data[i+1][j+1] = (float)*p++ - dark[i+1][j+1];
-			}
-			for(;i < cam_info.nMaxWidth; i++) p++;
-
-			/* If needed, try to destripe */
-
-			if (usb_camera.destripe)
-			{
-				row_min=0;
-				for (k=0; k<NUM_MIN; k++)
-					row_min += (float)min_pixels[k];
-				row_min /= NUM_MIN;
-				for (i=1; i<=rectAOI.s32Width;i++)
-					data[i][j+1] -= row_min;
-			}
+                for(j =1; j <= rectAOI.s32Height; j++)
+                {
+                    for(i=1; i <= rectAOI.s32Width; i++)
+                    {
+			data[i][j] = sum_frame[i][j]/num_sum_frame - dark[i][j];
+			sum_frame[i][j] = 0.0;
+		    }
 		}
 
 		/* Save this to the data cube if we need to */
@@ -2292,3 +2329,51 @@ int send_labao_set_usb_camera(bool send_to_all_clients)
 /************************************************************************/
 
 bool usb_cammera_is_running(void) {return usb_camera_running; }
+
+/************************************************************************/
+/* set_num_sum_frame()							*/
+/*									*/
+/* Get the USB camera area of interest 					*/
+/************************************************************************/
+
+int set_num_sum_frame(int num)
+{
+	if (num <= 0) return -1;
+
+	num_sum_frame = num;
+	count_sum_frame = 0;
+
+	return num;
+
+} /* set_num_sum_frame() */
+
+/************************************************************************/
+/* call_set_usb_camera_aoi()						*/
+/*									*/
+/* User callable version.						*/
+/************************************************************************/
+
+int call_set_num_sum_frame(int argc, char **argv)
+{
+	char	s[100];
+	int	num;
+
+	if (argc > 1)
+	{
+		sscanf(argv[1],"%d",&num);
+	}
+	else
+	{
+		clean_command_line();
+		sprintf(s,"    %5d", num);
+		if (quick_edit("Number of frames to sum",s,s,NULL,INTEGER)
+		   == KEY_ESC) return NOERROR;
+		sscanf(s,"%d",&num);
+	}
+
+	if (set_num_sum_frame(num) < 0)
+		return error(ERROR,"Invalid number of frames to sum");
+
+	return NOERROR;
+
+} /* call_set_num_sum_frame() */

@@ -1,0 +1,190 @@
+2014_04_01
+
+> Redefine the spot positions for ‘flat'
+
+Type “zc” for Zero Centroids.
+
+> - Measure and calculate a reconstructor
+
+Measure: type “measure” when looking at the beacon, in open loop but with the centroids near-ish to the centers of the boxes.
+
+Compute: type “recon” but I’m not entirely sure this works and I have to test it. Better, you can:
+
+“saveint” to save the interaction matrix, then
+
+compute_reconstructor INFILE OUTFILE
+
+(compute_reconstructor us a python script installed in /usr/local/bin )
+
+> - find the 'default' positions for a good wavefront.
+> - Close the loop
+
+
+Type “close”, then “setflat”. To save this to file, type “savedef”.
+
+-----
+Dr Michael IRELAND
+
+2014_07_21
+----------
+
+Using PICO 1 and DICH-S2 step size of about 40 seems goog.
+
+UP increases X 
+DOWN decreases X
+LEFT increases Y
+RIGHT decreases Y
+
+0.01 seems a goo maximum offset.
+
+
+2014_09_17
+----------
+
+Using old method full range of tiptilt signal is when all spots are on edge of
+box XTilt = -1.29 to 1.19 Ytilt = 1.40 to -1.53
+
+We will now center the beam using Autoalign. A1 = 0.00 A2 = 0.01 Focus = -0.06
+
+Switching to new code:
+
+Now Tiptilt = -0.01 0.01 Focus = -0.21 A1 = -0.01 A2 - 0.02
+
+Tiptilt Range X = -0.85 0.82 Y 0.69 0.78
+
+Doing autoalign as a test, but the numbers will need to change. Will need
+three decimal places for one.
+
+Does this make sense? 
+
+For tiptilt:
+
+Old way: divided by Nap / ARCSEC_PER_PIX = Nap/0.3
+New way: divided by Nap * Centrois_width/2.0 = Nap * 5.5
+
+Now 1/0.3 is 3.333 and so we expect our tiptilt numebrs to be 0.61 * old ones
+
+Now 1.3 * 0.6 = 0.80 So this is OK.
+
+As for fous etc:
+
+Old way is the same. New way is just Nap so we expect these numbers to be
+3.333 times larger. 
+
+Now 0.06 * 3.333 = 0.20 which makes perfect sense. 
+
+So, we should add a decimal place to the outputs, and change 0.01 to 0.005
+
+Checked rail alignment and it is fine. We shold nw define this as a new
+reference so the focus goes to zero.... which works. Save this as default.
+
+Try the new code now.
+
+Get lower numbers than before but of course larger numbers than old code. Try
+zeroing here.... So things are making some sort of sense.
+
+We now add a retro mirror and try and repeat all of this.
+
+Right on TEST1 moves UP UP moves left
+
+We get Focus = -0.03 A1 = -0.03 A2 = 0.03 TT = 0.02/-0.03 Hard to do better
+and some images look pretty crappy! Taking screen shot:
+
+2014_09_17_Retro_old_Code.png
+
+If we close the loop..... it doesn't seem to do much better.
+
+OK, let's not change the default mirror shape. We can now try adjusting focus
+and so on.
+
+Five cliks on FOC++ Focus = -0.46 10 on FOC-- Focus = 0.42. THis makes sense.
+Both closing the loop and using defaults got things back.
+
+Now setting Zerns to try astig:
+
+
+Adjusted Z! until Focus said it was OK. Z1 = 0.689
+Now incriment Z5/6 to see what happens.
+Start F = -0.002 A1 = -0.19 A2 = 0.054
+
+Z5 +0.1 F = -0.07 A1 = -0.19 A2 = -0.343
+Z5 -0.1 F = -0.03 A1 = -0.180 S2 = 0.389
+
+So Z5 is affecting mostly only A1.
+
+Z6 +0.1 F = -0.005 A1 = 0.239 A2 = 0.051
+Z6 -0.1 F = -0.113 A1 = -0.576 A2 = 0.055
+
+So Z6 is affecting mostly only A2
+
+Can we get something that looks close to zero on these?
+
+Found Z1 = 0.689 Z5 = 0.01 Z6 = 0.05 Not very different to DEFAULT.
+
+Now lunch...... and then we test the new code. THEN we need to realign this
+sucker.
+
+
+He's back.....
+
+These same Zernike modes seem to look OK, so we will start from there.
+
+Start F = -0.05 A1 = 0.064 A2 = 0.021
+
+Five clicks on FOC++ F -1.58 A1 = 0.10 A2 = 0.02
+Five on FOC--        F = 1.290 A1 = 0.05 A1 = -0.05
+
+Z5 +0.1 F -0.212 A1=0.03 A2 = -1.28
+Z5 -0.1 F -0.06  A1=0.16 A2 = 1.21
+Z6 +0.1 F -0.09  A1=1.46 A2 = -0.05
+Z6 -0.1 F -0.268 A1 = -1.20 A1 = -0.001
+
+So this seems again to look right.
+
+We also seem to have changed the scale in the follow ways:
+
+Focus  Old (0.46+0.42)/2 = 0.44
+	New (1.28+1.21)/2 = 1.24
+	Ratio 2.81 and we naively expect 3.333 - although there are some other
+	bugs in the old colde concerning max_offset.
+
+Z5 	Old (0.343+0.389)/2 = 0.366
+	New (1.21+1.28)/2   = 1.24
+				Ratio 3.3
+
+
+Z6 	Old (0.239+0.576)/2 = 0.408
+	New (1.46+1.20)/2   = 1.33
+				Ratio = 3.3
+
+So this is exactly what we expect. So things look good. Now, let's check all
+six beams for now using the new code.
+
+Checked all six beams on north end target.
+
+Set to Beam 1. Do autoalign take image - put in corner cube - Take image
+Repeat.
+	    Tx     Ty     Px    Py    F      A1     A2
+Beam 1 RF  0.008 -0.006  3.47  2.17  0.020 -0.017 -0.002
+Beam 1 CC  0.044  0.014  2.28  2.20  0.190 -0.123  0.076
+Beam 2 RF -0.006  0.002  3.43  2.17  0.027 -0.024 -0.005
+Beam 2 CC  0.059  0.012  3.30  2.19  0.202 -0.096  0.065
+Beam 3 RF -0.007  0.008  3.42  2.16  0.000 -0.041  0.020
+Beam 3 CC  0.053  0.008  2.32  2.20  0.164 -0.127  0.078
+Beam 4 RF -0.006  0.003  3.49  2.13  0.161 -0.022  0.011
+Veam 4 CC  0.073  0.006  3.27  2.22  0.388 -0.091  0.058
+Beam 5 RF  0.002  0.008  3.46  2.17  0.173 -0.010  0.010
+Beam 5 CC  0.061  0.008  3.29  2.20  0.356 -0.090  0.073
+Beam 6 RF  0.004  0.000  3.47  2.15  0.148 -0.028  0.013
+Beam 6 CC  0.056  0.008  3.28  2.21  0.325 -0.102  0.057
+Beam 1 RF  0.005  0.001  3.47  2.17  0.034 -0.015 -0.002
+
+It seems B123 are different to B456.
+
+The PAVO dichroics are in Beams 1 2 and 3!!!!
+
+We need to 
+
+	_ Redo "FLAT" withour pavo dichroics and LDCs
+	_ Test position
+	_ Realign WFS.
