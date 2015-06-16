@@ -305,5 +305,6 @@ int call_add_wfs_aberration(int argc, char **argv);
 int toggle_use_reference(int argc, char **argv);
 int set_reference_now(int argc, char **argv);
 int toggle_use_servo_flat(int argc, char **argv);
+int start_scope_dichroic_mapping(int argc, char **argv);
 
 #endif

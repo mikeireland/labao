@@ -143,5 +143,6 @@ struct {
 		{"togref",     	toggle_use_reference},
 		{"setref",     	set_reference_now},
 		{"tusf",     	toggle_use_servo_flat},
+		{"dichmap",     start_scope_dichroic_mapping},
 
 		{NULL,		NULL}	};

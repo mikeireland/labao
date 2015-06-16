@@ -106,8 +106,20 @@ static int wfs_results_n = 0;
 static struct s_labao_wfs_results wfs_reference;
 static bool autoalign_lab_dichroic = FALSE;
 static bool autoalign_scope_dichroic = FALSE;
+
+static bool scope_dichroic_mapping = FALSE;
+static float target_telescope_az = 90.0;
+static float initial_mapping_az = 90.0;
+#define DICHROIC_MAPPING_ALIGN  0
+#define DICHROIC_MAPPING_ROTATE 1
+static int scope_dichroic_mapping_step = DICHROIC_MAPPING_ALIGN;
+FILE *scope_dichroic_mapping_file;
+
+static int current_total_flux = 0;
 static bool autoalign_zernike = FALSE;
-static	int autoalign_count = 0;
+static int autoalign_count = 0;
+static float autoalign_x_total = 0.0;
+static float autoalign_y_total = 0.0;
 static float zero_clamp = ZERO_CLAMP;
 static float denom_clamp = DENOM_CLAMP;
 static bool set_center = FALSE;
@@ -150,6 +162,9 @@ void initialize_fsm(void)
 	calc_labao_results.focus = 0.0;
 	calc_labao_results.a1 = 0.0;
 	calc_labao_results.a2 = 0.0;
+	calc_labao_results.c1 = 0.0;
+	calc_labao_results.c2 = 0.0;
+	
 
 	wfs_results.xtilt = 0.0;
 	wfs_results.ytilt = 0.0;
@@ -158,6 +173,8 @@ void initialize_fsm(void)
 	wfs_results.focus = 0.0;
 	wfs_results.a1 = 0.0;
 	wfs_results.a2 = 0.0;
+	wfs_results.c1 = 0.0;
+	wfs_results.c2 = 0.0;
 
 	wfs_results_n = 0;
 
@@ -168,6 +185,8 @@ void initialize_fsm(void)
 	wfs_reference.focus = 0.0;
 	wfs_reference.a1 = 0.0;
 	wfs_reference.a2 = 0.0;
+	wfs_reference.c1 = 0.0;
+	wfs_reference.c2 = 0.0;
 
 	for (i=0; i<NUM_ACTUATORS; i++)
 	for (j=0; j<2*NUM_LENSLETS; j++)
@@ -377,6 +396,8 @@ int load_defaults(char* filename_in)
 	wfs_reference.focus = 0.0;
 	wfs_reference.a1 = 0.0;
 	wfs_reference.a2 = 0.0;
+	wfs_reference.c1 = 0.0;
+	wfs_reference.c2 = 0.0;
 
 	if (GetDataLine(s, 80, params_file) == -1)
 	{
@@ -413,6 +434,8 @@ int load_defaults(char* filename_in)
 		fclose(params_file);
 		return -11;
 	}
+
+#warning Coma terms need to be here too.
 
 	fclose(params_file);
 
@@ -551,6 +574,8 @@ int save_defaults(char* filename_in)
 
 	fprintf(params_file, "# Reference position Focus and Astigamtism\n");
 	fprintf(params_file, "%f %f %f\n", wfs_reference.focus, wfs_reference.a1, wfs_reference.a2);
+
+#warning Coma terms need to be here too.
 
 	/* That is all. */
 
@@ -798,7 +823,7 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 	bool is_new_actuator=TRUE;
 	float outer_dm_mean = 0.0;
 	float x_offset = 0.0, y_offset = 0.0, total_flux = 0.0;
-	float	xtilt = 0.0, ytilt = 0.0, focus = 0.0, a1 = 0.0, a2 = 0.0;
+	float	xtilt = 0.0, ytilt = 0.0, focus = 0.0, a1 = 0.0, a2 = 0.0, c1=0.0, c2=0.0;
 	float	xpos = 0.0, ypos = 0.0;
 
 	/* First, compute the centroids. */
@@ -1230,11 +1255,17 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 		xpos += x_offset * avg_fluxes[i];
 		ypos += y_offset * avg_fluxes[i];
 
+#warning This is not normalised correctly. Should give 1 for e.g. peak to valley slopes of 1 arcsec.
+
 		focus += (xc[i]*x_offset + yc[i]*y_offset);
 		a1 +=    (xc[i]*x_offset - yc[i]*y_offset);
 		a2 +=    (yc[i]*x_offset + xc[i]*y_offset);
+		c1 +=  xc[i]*(9*x_offset*x_offset + 3*y_offset*y_offset - 2)/9.0 + 
+			yc[i]*2*x_offset*y_offset/3.0;
+		c2 +=  yc[i]*(9*y_offset*y_offset + 3*x_offset*x_offset - 2)/9.0 + 
+			xc[i]*2*x_offset*y_offset/3.0;
 	}
-
+	current_total_flux = total_flux;
 	/* This is the old method.... */
 
 	/*
@@ -1254,6 +1285,9 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 	focus /= (float)NUM_LENSLETS;
 	a1 /= (float)NUM_LENSLETS;
 	a2 /= (float)NUM_LENSLETS;
+	c1 /= (float)NUM_LENSLETS;
+	c2 /= (float)NUM_LENSLETS;
+	
 
 	if (total_flux > ZERO_CLAMP)
 	{
@@ -1275,6 +1309,8 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 	focus /= max_offset;
 	a1 /= max_offset;
 	a2 /= max_offset;
+	c1 /= max_offset*max_offset;
+	c2 /= max_offset*max_offset;
 	xpos /= max_offset;
 	ypos /= max_offset;
 
@@ -1290,6 +1326,8 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 		aberrations_record[aberrations_record_count].focus = focus;
 		aberrations_record[aberrations_record_count].a1 = a1;
 		aberrations_record[aberrations_record_count].a2 = a2;
+		aberrations_record[aberrations_record_count].c1 = c1;
+		aberrations_record[aberrations_record_count].c2 = c2;
 		aberrations_record[aberrations_record_count].fsm_state = 
 								fsm_state;
 		aberrations_record[aberrations_record_count].time_stamp = 
@@ -1307,6 +1345,8 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 	calc_labao_results.ypos += ypos;
 	calc_labao_results.a1 += a1;
 	calc_labao_results.a2 += a2;
+	calc_labao_results.c1 += c1;
+	calc_labao_results.c2 += c2;
 	 for (i=0;i<NUM_ACTUATORS;i++)
                 fsm_calc_mean_dm[i] += edac40_current_value(i+1);
 
@@ -1330,6 +1370,8 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 		wfs_results.ypos -= ypos_center;
 		wfs_results.a1 = calc_labao_results.a1/wfs_results_num;
 		wfs_results.a2 = calc_labao_results.a2/wfs_results_num;
+		wfs_results.c1 = calc_labao_results.c1/wfs_results_num;
+		wfs_results.c2 = calc_labao_results.c2/wfs_results_num;
 
 		for (i=0;i<NUM_ACTUATORS;i++)
                 {
@@ -1346,6 +1388,8 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 			wfs_reference.focus = wfs_results.focus;
 			wfs_reference.a1 = wfs_results.a1;
 			wfs_reference.a2 = wfs_results.a2;
+			wfs_reference.c1 = wfs_results.c1;
+			wfs_reference.c2 = wfs_results.c2;
 			set_reference = FALSE;
 		}
 		calc_labao_results.xtilt = 0.0;
@@ -1359,6 +1403,8 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 			wfs_results.focus -= wfs_reference.focus;
 			wfs_results.a1 -= wfs_reference.a1;
 			wfs_results.a2 -= wfs_reference.a2;
+			wfs_results.c1 -= wfs_reference.c1;
+			wfs_results.c2 -= wfs_reference.c2;
 		}
 		calc_labao_results.xtilt = 0.0;
 		calc_labao_results.ytilt = 0.0;
@@ -1367,6 +1413,8 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 		calc_labao_results.focus = 0.0;
 		calc_labao_results.a1 = 0.0;
 		calc_labao_results.a2 = 0.0;
+		calc_labao_results.c1 = 0.0;
+		calc_labao_results.c2 = 0.0;
 
 		wfs_results_n = 0;
 
@@ -1520,9 +1568,11 @@ int call_measure_reconstructor(int argc, char **argv)
 int fsm_status(void)
 {
 	struct smessage mess;
+	struct s_elaz pos;
 	struct s_aob_move_motor motor_move;
 	mirror_move mirror_move;
 	char	s[123];
+	char	*args[2];
 	static time_t  last_time = 0;
 	float	theta, x, y;
 
@@ -1561,6 +1611,52 @@ int fsm_status(void)
 		wprintw(status_window, "%9s", "Reference");
 	else
 		wprintw(status_window, "%9s", "Beacon");
+
+	/* Check on the scope_dichroic_mapping function */
+	if (scope_dichroic_mapping) {
+		if ( (scope_dichroic_mapping_step == DICHROIC_MAPPING_ALIGN) && (!autoalign_scope_dichroic) ){
+			/* Have we moved all the way around? */
+			if (fabs(telescope_status.az - initial_mapping_az) > 359){
+				scope_dichroic_mapping = FALSE;
+				fclose(scope_dichroic_mapping_file);
+				message(system_window,
+				"Dichroic mapping complete!");
+				send_labao_text_message("%s",
+				"Dichroic mapping complete!");
+			} else {
+				/* Write out the autoalign total from the last alignment */
+				fprintf(scope_dichroic_mapping_file, "1 %5.1f %6.2f %6.2f\n", 
+				 telescope_status.az, autoalign_x_total, autoalign_y_total);
+				/* Time to rotate the telescope */
+				scope_dichroic_mapping_step = DICHROIC_MAPPING_ROTATE;
+				pos.el = telescope_status.el;
+				target_telescope_az = telescope_status.az + 10;
+				pos.az = target_telescope_az;
+				mess.type = TELESCOPE_ELAZ;
+				mess.data = (unsigned char *)&pos;
+				mess.length = sizeof(pos);
+				send_message(telescope_server, &mess);
+			}
+		}
+		
+		if ( (scope_dichroic_mapping_step == DICHROIC_MAPPING_ROTATE) && 
+		     (fabs(telescope_status.az - target_telescope_az)<0.1) ){
+		/* This is only a rough sanity check... !!! the number should be checked */
+			if (current_total_flux < 200){
+				scope_dichroic_mapping = FALSE;
+				fclose(scope_dichroic_mapping_file);
+				message(system_window,
+				"Giving up on scope dichroic mapping - low flux.");
+				send_labao_text_message("%s",
+				"Giving up on scope dichroic mapping - low flux.");
+			} else {
+				args[0] = "adich";
+				args[1] = "50"; /* A fixed number of tries.*/
+				start_autoalign_scope_dichroic(2, args);
+				scope_dichroic_mapping_step = DICHROIC_MAPPING_ALIGN;
+			}
+		}
+	}
 
 	/* Is there a new mean we can work with? */
 
@@ -1692,10 +1788,21 @@ int fsm_status(void)
 			{
 				autoalign_scope_dichroic = FALSE;
 				autoalign_count = 0;
-				message(system_window,
+				if (scope_dichroic_mapping){
+					scope_dichroic_mapping = FALSE;
+					fclose(scope_dichroic_mapping_file);
+					message(system_window,
+					"Giving up on scope dichroic mapping - autoalignment fail.");
+					send_labao_text_message("%s",
+					"Giving up on scope dichroic mapping - autoalignment fail.");
+				} else {
+					message(system_window,
 					"Giving up on scope autoalignment.");
-				send_labao_text_message("%s",
+					send_labao_text_message("%s",
 					"Giving up on scope autoalignment.");
+				}
+				fprintf(scope_dichroic_mapping_file, "0 %5.1f %6.2f %6.2f\n", 
+				 telescope_status.az, autoalign_x_total, autoalign_y_total);
 				pthread_mutex_unlock(&fsm_mutex);
 				return NOERROR;
 			}
@@ -1725,6 +1832,7 @@ int fsm_status(void)
 			    {
 				motor_move.motor = AOB_DICHR_2;
 				motor_move.position = SCOPE_ALIGN_STEP;
+				autoalign_x_total += SCOPE_ALIGN_STEP;
 				send_message(telescope_server, &mess);
 				strcat(s," Moving RIGHT");
 			    }
@@ -1732,6 +1840,7 @@ int fsm_status(void)
 			    {
 				motor_move.motor = AOB_DICHR_2;
 				motor_move.position = -1.0*SCOPE_ALIGN_STEP;
+				autoalign_x_total -= SCOPE_ALIGN_STEP;
 				send_message(telescope_server, &mess);
 				strcat(s," Moving LEFT");
 			    }
@@ -1746,6 +1855,7 @@ int fsm_status(void)
 			    {
 				motor_move.motor = AOB_DICHR_1;
 				motor_move.position = SCOPE_ALIGN_STEP;
+				autoalign_y_total += SCOPE_ALIGN_STEP;
 				send_message(telescope_server, &mess);
 				strcat(s," Moving UP");
 			    }
@@ -1753,6 +1863,7 @@ int fsm_status(void)
 			    {
 				motor_move.motor = AOB_DICHR_1;
 				motor_move.position = -1.0*SCOPE_ALIGN_STEP;
+				autoalign_y_total -= SCOPE_ALIGN_STEP;
 				send_message(telescope_server, &mess);
 				strcat(s," Moving DOWN");
 			    }
@@ -1770,6 +1881,7 @@ int fsm_status(void)
 			last_time = time(NULL);
 		}
 
+#warning This bit needs coma also.
 		if (autoalign_zernike && time(NULL) > last_time)
 		{
 			/* Is it done? */
@@ -1883,6 +1995,12 @@ int fsm_status(void)
 		wstandend(status_window);
 		wprintw(status_window, "%6.3f %6.3f", 
 			wfs_results.a1, wfs_results.a2);
+		wstandout(status_window);
+		mvwaddstr(status_window,8,41,"Coma: ");
+		wstandend(status_window);
+		wprintw(status_window, "%6.3f %6.3f", 
+			wfs_results.c1, wfs_results.c2);
+	
 	}
 
 	pthread_mutex_unlock(&fsm_mutex);
@@ -2172,6 +2290,35 @@ int edit_wfs_results_num(int argc, char **argv)
 } /* edit_wfs_results_num() */
 
 /************************************************************************/
+/* start_scope_dichroic_mapping()					*/
+/*									*/
+/* Starts the automated mapping routine.			*/
+/************************************************************************/
+
+int start_scope_dichroic_mapping(int argc, char **argv)
+{
+	char *args[2], filename[80], data_dir[80];
+	/* Sanity check here so we don't get ourselves stuck. */
+	if (scope_dichroic_mapping) return error(ERROR, "Already mapping the scope dichroic positions.");
+
+	sprintf(filename, "%s/%s_dich_map.dat", get_data_directory(data_dir), labao_name);
+	if ( (scope_dichroic_mapping_file = fopen(filename, "w")) == NULL ) 
+		return error(ERROR, "Could not open dichroic mapping file");
+
+	/* Start with a dichroic alignment */
+	args[0] = "adich";
+	args[1] = "50"; /* A fixed number of tries.*/
+	start_autoalign_scope_dichroic(2, args);
+	/* Set the initial azimuth... apart from that it is just a matter of seeting some local globals */
+	initial_mapping_az = telescope_status.az;
+	scope_dichroic_mapping_step = DICHROIC_MAPPING_ALIGN;
+	scope_dichroic_mapping = TRUE;
+
+	return NOERROR;
+}
+
+
+/************************************************************************/
 /* start_autoalign_lab_dichroic()					*/
 /*									*/
 /* Starts the Dichroic Automated alignment routine.			*/
@@ -2261,6 +2408,8 @@ int start_autoalign_scope_dichroic(int argc, char **argv)
 	message(system_window,"Scope autoalignment begins Trys = %d",
 		autoalign_count);
 
+	autoalign_x_total = 0.0;
+	autoalign_y_total = 0.0;
 	use_reference = FALSE;
 	autoalign_scope_dichroic = TRUE;
 
@@ -2628,10 +2777,10 @@ void complete_aberrations_record(void)
 	fprintf(fp,"# GMT DAY         : %d\n",day);
 	fprintf(fp,"# FSM STATE       : %d\n",aberrations_record[0].fsm_state);
 	fprintf(fp,
-	"# Time     Tilt X  Tilt Y   Pos X   Pos Y   Focus    A1      A2\n");
+	"# Time     Tilt X  Tilt Y   Pos X   Pos Y   Focus    A1      A2      C1     C2\n");
 	
 	for(i=0; i< aberrations_record_num; i++)
-		fprintf(fp, "%9d %7.4f %7.4f %7.4f %7.4f %7.4f %7.4f %7.4f\n",
+		fprintf(fp, "%9d %7.4f %7.4f %7.4f %7.4f %7.4f %7.4f %7.4 %7.4f %7.4f\n",
 			aberrations_record[i].time_stamp,			
 			aberrations_record[i].xtilt,			
 			aberrations_record[i].ytilt,			
@@ -2639,7 +2788,9 @@ void complete_aberrations_record(void)
 			aberrations_record[i].ypos,
 			aberrations_record[i].focus,
 			aberrations_record[i].a1,
-			aberrations_record[i].a2);
+			aberrations_record[i].a2,
+			aberrations_record[i].c1,
+			aberrations_record[i].c2);
 
 	fclose(fp);
 	pthread_mutex_lock(&fsm_mutex);
@@ -2729,6 +2880,7 @@ int call_add_wfs_aberration(int argc, char **argv)
 int add_wfs_aberration(int zernike, float amplitude)
 {
 	int	i;
+	float yy, xx;
 
 #warning Have a close look at the normalization of this compared to calculation
 	switch (zernike)
@@ -2786,6 +2938,35 @@ int add_wfs_aberration(int zernike, float amplitude)
 		    aberration_yc[i] += amplitude *
 			(x_centroid_offsets[i] - x_mean_offset)/
 				(0.778*max_offset);
+		}
+		break;
+
+	    case 7: /* c1 (first coma) term */
+		for (i=0;i<NUM_LENSLETS;i++)
+		{
+		    xx = (x_centroid_offsets[i] - x_mean_offset)/
+				(0.778*max_offset);
+		    yy = (y_centroid_offsets[i] - y_mean_offset)/
+				(0.778*max_offset);
+		    aberration_xc[i] += amplitude *
+			(9*xx*xx + 3*yy*yy - 2)/9.0;
+		    aberration_yc[i] += amplitude *
+			2*xx*yy/3.0;
+		}
+		break;
+
+	    
+	    case 8: /* c2 (second coma) term */
+		for (i=0;i<NUM_LENSLETS;i++)
+		{
+		    xx = (x_centroid_offsets[i] - x_mean_offset)/
+				(0.778*max_offset);
+		    yy = (y_centroid_offsets[i] - y_mean_offset)/
+				(0.778*max_offset);
+		    aberration_xc[i] += amplitude *
+			2*xx*yy/3.0;
+		    aberration_yc[i] += amplitude *
+			(3*xx*xx + 9*yy*yy - 2)/9.0;;
 		}
 		break;
 
@@ -2878,3 +3059,4 @@ int toggle_use_servo_flat(int argc, char **argv)
 	return NOERROR;
 
 } /* toggle_use_servo_flat() */
+

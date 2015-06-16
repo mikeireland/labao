@@ -32,10 +32,10 @@
 /* How many frames do we need in the ring buffer? */
 
 #define NUM_IMAGE_MEM 	50
-#define USB_DISP_X	640
-#define USB_DISP_Y	512
+#define USB_DISP_X	320
+#define USB_DISP_Y	256 /* !!! Must be a multiple of 2 */
 #define MAX_FILE_NUMBER	999
-
+#define SECS_FOR_PROC  2
 #define NUM_MIN 20 /*The number of minimum pixels in each row to average over */
 
 static char fits_filename[2000];
@@ -66,9 +66,10 @@ static pthread_mutex_t usb_camera_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_t usb_camera_thread;
 static bool usb_camera_running = FALSE;
 static int usb_camera_num_frames = 0;
+static int usb_camera_last_num_frames=0;
 static void (*usb_camera_callback)(CHARA_TIME time_stamp,
 		float **data, int width, int height) = NULL;
-static time_t usb_camera_start = 0;
+static time_t usb_camera_last_proc_sec = 0;
 static Window usb_camera_window;
 static XImage *usb_camera_ximage = NULL;
 static bool usb_camera_display = FALSE;
@@ -613,10 +614,11 @@ int start_usb_camera(int argc, char **argv)
 
 	/* Wait for an even second */
 
-	usb_camera_start = time(NULL);
-	while (usb_camera_start == time(NULL));
-	usb_camera_start = time(NULL);
+	usb_camera_last_proc_sec = time(NULL);
+	while (usb_camera_last_proc_sec == time(NULL));
+	usb_camera_last_proc_sec = time(NULL);
 	usb_camera_num_frames = 0;
+	usb_camera_last_num_frames = 0;
 
 	/* OK, we're running */
 
@@ -672,9 +674,13 @@ int stop_usb_camera(int argc, char **argv)
 
 int usb_camera_status(void)
 {
-	time_t dt;
+	time_t now, dt;
+	/* Some stupid NRC arrays */
 	static float	**values = NULL;
 	static float    **data = NULL;
+	/* And a fixed, fast array for socket display */
+	static unsigned char data4bit[USB_DISP_X*USB_DISP_Y/2];
+	unsigned char *cp;
 	char	*picture;
 	int	i, j, x, y;
 	float	x_zero, y_zero;
@@ -709,19 +715,22 @@ int usb_camera_status(void)
 	   wprintw(status_window,"%9s", "Cam Off");
 	}
 
-	dt = time(NULL) - usb_camera_start;
 	wstandout(status_window);
 	mvwaddstr(status_window,4,0,"Proc/Sec: ");
 	wstandend(status_window);
 
 	if (usb_camera_running)
 	{
-	    if (dt > 0)
+	    now = time(NULL);
+	    if (now - usb_camera_last_proc_sec >= SECS_FOR_PROC)
 	    {
 		wprintw(status_window,"%9.2f",
-		usb_camera.proc_fps = (float)usb_camera_num_frames/(float)dt);
+			usb_camera.proc_fps = (float)(usb_camera_num_frames - usb_camera_last_num_frames) /
+			 (float)(now - usb_camera_last_proc_sec));
+		usb_camera_last_num_frames = usb_camera_num_frames;
+		usb_camera_last_proc_sec = now;	
 	    }
-	    else
+	    else if (usb_camera_last_proc_sec == 0)
 	    {
 		wprintw(status_window,"%9.2f", 0.0);
 	    }
@@ -849,6 +858,12 @@ int usb_camera_status(void)
 		process_message_socket_all_clients(TRUE);
                 if (client_signal_set(LABAO_SIGNAL_READY_FOR_DISPLAY))
                 {
+		  for (cp=data4bit,i=1;i<USB_DISP_X;i++)
+		    for (j=1;j<USB_DISP_Y;j+=2)
+		      {
+			*cp++ = (unsigned char)((values[i][j] - usb_camera.min)/(usb_camera.max - usb_camera.min)*16) + 
+			  16*(unsigned char)((values[i][j+1] - usb_camera.min)/(usb_camera.max - usb_camera.min)*16);
+		      }
 			usb_camera.num_lenslets = NUM_LENSLETS;
 			usb_camera.usb_disp_x = USB_DISP_X;
 			usb_camera.usb_disp_y = USB_DISP_Y;
@@ -887,26 +902,33 @@ int usb_camera_status(void)
 			cenmess.length = (int)clen;
 			cenmess.data = (unsigned char *)compressed_cen_data;
 
-			len = USB_DISP_X * USB_DISP_Y * sizeof(float);
-			clen = 4*len;
+			/* Theo - this was silly. An image can really only be seen with 
+			 a perceived bit depth of 4 or so.*/
+			// len = USB_DISP_X * USB_DISP_Y * sizeof(float);
+			// clen = 4*len;
+			len = USB_DISP_X * USB_DISP_Y /2;
+			clen = len;
 
 		        if ((image = (float *)malloc(len)) == NULL)
 				error(FATAL, "Out of memory");
 		        if ((compressed_image = (float *)malloc(clen))==NULL)
 				error(FATAL, "Out of memory");
-
+			/*
 			for(fp = image, i = 1; i <= USB_DISP_X; i++)
 			for(j = 1; j <= USB_DISP_Y; j++)
 				*fp++ = values[i][j];
+				*/
 
 			if ((i = compress((unsigned char *)compressed_image,
                                 &clen,
-                                (unsigned char *)image, len)) < Z_OK)
+					  (unsigned char *)data4bit, len)) < Z_OK)
+					  //        (unsigned char *)image, len)) < Z_OK)
                         {
                              return error(ERROR,
 				"Failed to compress image. %d",i);
                         }
-
+			/* !!! For bugshooting !!! */
+			//fprintf(stderr, "%d\n", clen);
 			imagemess.type = LABAO_USB_IMAGE;
 			imagemess.length = (int)clen;
 			imagemess.data = (unsigned char *)compressed_image;
@@ -994,7 +1016,6 @@ int usb_camera_status(void)
 				*fp++ = data[i][j];
 
 			/* Build the extension image (DM values) */
-
 			for(i=1; i<= NUM_ACTUATORS; i++)
 			  dm_data[i-1] = edac40_current_value(i);
 
@@ -1169,7 +1190,7 @@ int usb_camera_status(void)
 	mvwaddstr(status_window,5,0,"Disp/Sec: ");
 	wstandend(status_window);
 
-	if (usb_camera_display)
+	if (usb_camera_local_display)
 	{
 
 	    if (dt > 0)
@@ -1184,7 +1205,7 @@ int usb_camera_status(void)
 	}
 	else
 	{
-	   wprintw(status_window,"%9s", "Disp Off");
+	   wprintw(status_window,"%9s", "Local Off");
 	}
 
 	return NOERROR;

@@ -43,10 +43,12 @@ static int last_usb_disp_y = -1;
 int message_labao_usb_image(int server, struct smessage *mess)
 {
         unsigned char *compressed_values;
+	//float	*uncompressed_values;
 	unsigned char *uncompressed_values;
 	char *usb_image;
 	uLongf  len, clen;
 	int	i,j;
+	float	*pf1;
 	unsigned char *pu1, achar;
 	char	*pc1, *pc2;
 
