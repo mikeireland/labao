@@ -32,7 +32,7 @@
 int server = -1;
 char display[256];	/* Name of display to use */
 int server_open = FALSE;
-int display_delay_ms = 0;
+int display_delay_ms = 200;
 char send_ready_for_display = TRUE;
 char do_local_display = TRUE;
 #ifdef GTK2
