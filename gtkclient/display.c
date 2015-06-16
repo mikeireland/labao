@@ -43,11 +43,11 @@ static int last_usb_disp_y = -1;
 int message_labao_usb_image(int server, struct smessage *mess)
 {
         unsigned char *compressed_values;
-	float	*uncompressed_values;
+	unsigned char *uncompressed_values;
 	char *usb_image;
 	uLongf  len, clen;
 	int	i,j;
-	float	*pf1;
+	unsigned char *pu1, achar;
 	char	*pc1, *pc2;
 
 	/* Do we do anything at all? */
@@ -75,7 +75,7 @@ int message_labao_usb_image(int server, struct smessage *mess)
 	}
 
 	clen = mess->length;
-	len = usb_camera.usb_disp_x * usb_camera.usb_disp_y * sizeof(float) * 2;
+	len = usb_camera.usb_disp_x * usb_camera.usb_disp_y / 2;
 		
 	/* Allocate memory */
 
@@ -86,7 +86,7 @@ int message_labao_usb_image(int server, struct smessage *mess)
 		return FALSE;
 	}
 	
-	if ((compressed_values = malloc(len)) == NULL)
+	if ((compressed_values = malloc(clen)) == NULL)
 	{
 		print_status(ERROR,"Ran out of memory!\n");
 		free(uncompressed_values);
@@ -115,7 +115,7 @@ int message_labao_usb_image(int server, struct smessage *mess)
 	
 	/* Does it come out right? */
 
-	if (len != usb_camera.usb_disp_x*usb_camera.usb_disp_y*sizeof(float))
+	if (len != usb_camera.usb_disp_x*usb_camera.usb_disp_y/2)
 	{
 		print_status(ERROR,
 			"Uncompressed size does not match frame size.\n");
@@ -145,8 +145,13 @@ int message_labao_usb_image(int server, struct smessage *mess)
 
 	/* Copy the data */
 
-	for(pf1 = uncompressed_values, i=1; i<=usb_camera.usb_disp_x; i++)
-	for(j= 1; j<=usb_camera.usb_disp_y; j++) values[i][j] = *pf1++;
+	for(pu1 = (unsigned char *) uncompressed_values, i=1; i<=usb_camera.usb_disp_x; i++)
+	for(j= 1; j<=usb_camera.usb_disp_y; j+=2)
+	  {
+	    achar = *pu1++;
+	    values[i][j] = (achar % 16)*(usb_camera.max - usb_camera.min) + usb_camera.min;
+	    values[i][j+1] = (achar / 16)*(usb_camera.max - usb_camera.min) + usb_camera.min;
+	  }
 
 	/* OK, finished with the memory */
 
