@@ -994,6 +994,7 @@ int usb_camera_status(void)
 				*fp++ = data[i][j];
 
 			/* Build the extension image (DM values) */
+
 			for(i=1; i<= NUM_ACTUATORS; i++)
 			  dm_data[i-1] = edac40_current_value(i);
 
