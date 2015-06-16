@@ -68,6 +68,8 @@ static const float centroid_window[][CENTROID_WINDOW_WIDTH] =
 static float centroid_xw[CENTROID_WINDOW_WIDTH][CENTROID_WINDOW_WIDTH];
 static float centroid_yw[CENTROID_WINDOW_WIDTH][CENTROID_WINDOW_WIDTH];
                          
+static char *dichroic_types[] = {"GRAY ", "SPARE", "YSO  ", NULL};
+
 /* Possible centroiding types */
 
 #define CENTROID_WINDOW_ONLY 0
@@ -94,7 +96,10 @@ static float fsm_actuator_to_sensor[NUM_ACTUATORS][2*NUM_LENSLETS];
 static float fsm_xc_int[NUM_LENSLETS];
 static float fsm_yc_int[NUM_LENSLETS];
 static int fsm_cyclenum=0;
-static float fsm_flat_dm[NUM_ACTUATORS];
+static float *fsm_flat_dm;
+static float fsm_flat_dm_yso[NUM_ACTUATORS];
+static float fsm_flat_dm_gray[NUM_ACTUATORS];
+static float fsm_flat_dm_spare[NUM_ACTUATORS];
 static float fsm_mean_dm[NUM_ACTUATORS];
 static float fsm_calc_mean_dm[NUM_ACTUATORS];
 static float fsm_dm_offset[NUM_ACTUATORS];
@@ -137,6 +142,7 @@ static bool use_servo_flat = TRUE;
 /* Globals. */
 
 int fsm_state = FSM_CENTROIDS_ONLY;
+int current_dichroic = AOB_DICHROIC_SPARE;
 float x_centroid_offsets[NUM_LENSLETS];
 float y_centroid_offsets[NUM_LENSLETS];
 float xc[NUM_LENSLETS];
@@ -197,12 +203,16 @@ void initialize_fsm(void)
 
 	for (i=0;i<NUM_ACTUATORS;i++)
 	{
-		fsm_flat_dm[i]=DM_DEFAULT;
+		fsm_flat_dm_yso[i]=DM_DEFAULT;
+		fsm_flat_dm_gray[i]=DM_DEFAULT;
+		fsm_flat_dm_spare[i]=DM_DEFAULT;
 		fsm_mean_dm[i]=DM_DEFAULT;
 		fsm_calc_mean_dm[i]=DM_DEFAULT;
 		fsm_dm_offset[i]=0.0;	
 		last_delta_dm[i]=0.0;	
 	}
+	fsm_flat_dm = fsm_flat_dm_spare;
+	current_dichroic = AOB_DICHROIC_SPARE;
 
 	for (i=0;i<NUM_LENSLETS;i++)
 	{
@@ -350,7 +360,9 @@ int load_defaults(char* filename_in)
 			return -6;
 		}
 
-		if (sscanf(s, "%f", fsm_flat_dm+i) != 1)
+		if (sscanf(s, "%f %f %f", fsm_flat_dm_yso+i,
+					  fsm_flat_dm_gray+i,
+					  fsm_flat_dm_spare+i) != 3)
 		{
 			fclose(params_file);
 			return -7;
@@ -554,9 +566,12 @@ int save_defaults(char* filename_in)
 
 	fprintf(params_file,
 		"# Default actuator positions for a flat wavefront.\n");	
+	fprintf(params_file, "# YSO      GRAY     SPARE.\n");	
 	for (i=0;i<NUM_ACTUATORS;i++)
 	{
-		fprintf(params_file, "%f\n", fsm_flat_dm[i]);
+		fprintf(params_file, "%.5f %.5f %.5f\n", fsm_flat_dm_yso[i],
+					  	   fsm_flat_dm_gray[i],
+					  	   fsm_flat_dm_spare[i]);
 	}
 
 	/* Save the "Center" of the pupil */
@@ -1330,6 +1345,8 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 		aberrations_record[aberrations_record_count].c2 = c2;
 		aberrations_record[aberrations_record_count].fsm_state = 
 								fsm_state;
+		aberrations_record[aberrations_record_count].current_dichroic = 
+							current_dichroic;
 		aberrations_record[aberrations_record_count].time_stamp = 
 								time_stamp;
 
@@ -1358,6 +1375,7 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 		wfs_results.xpos = calc_labao_results.xpos/wfs_results_num;
 		wfs_results.ypos = calc_labao_results.ypos/wfs_results_num;
 		wfs_results.fsm_state = fsm_state;
+		wfs_results.current_dichroic = current_dichroic;
 
 		if (set_center)
 		{
@@ -1579,7 +1597,12 @@ int fsm_status(void)
 	/* The overall state. */
 
 	wstandout(status_window);
-	mvwaddstr(status_window,2,20,"FSM  : ");
+	mvwaddstr(status_window,1,20,"Dichroic: ");
+	wstandend(status_window);
+	wprintw(status_window," %s", dichroic_types[current_dichroic - 1]);
+
+	wstandout(status_window);
+	mvwaddstr(status_window,2,20,"FSM     : ");
 	wstandend(status_window);
 	switch (fsm_state)
 	{
@@ -1600,12 +1623,12 @@ int fsm_status(void)
 	}
 
 	wstandout(status_window);
-	mvwaddstr(status_window,3,20,"IntN : ");
+	mvwaddstr(status_window,3,20,"IntN    : ");
 	wstandend(status_window);
 	wprintw(status_window, "%9d", wfs_results_num);
 
 	wstandout(status_window);
-	mvwaddstr(status_window,4,20,"Beam : ");
+	mvwaddstr(status_window,4,20,"Beam    : ");
 	wstandend(status_window);
 	if (use_reference)
 		wprintw(status_window, "%9s", "Reference");
@@ -1977,26 +2000,26 @@ int fsm_status(void)
 		/* Now output these variables to the status window */
 
 		wstandout(status_window);
-		mvwaddstr(status_window,5,20,"Tilt : ");
+		mvwaddstr(status_window,5,20,"Tilt    : ");
 		wstandend(status_window);
 		wprintw(status_window, "%6.3f %6.3f", 
 			wfs_results.xtilt, wfs_results.ytilt);
 		wstandout(status_window);
-		mvwaddstr(status_window,6,20,"Pos  : ");
+		mvwaddstr(status_window,6,20,"Pos     : ");
 		wstandend(status_window);
 		wprintw(status_window, "%6.3f %6.3f", 
 			wfs_results.xpos, wfs_results.ypos);
 		wstandout(status_window);
-		mvwaddstr(status_window,7,20,"Focus: ");
+		mvwaddstr(status_window,7,20,"Focus   : ");
 		wstandend(status_window);
 		wprintw(status_window, "%6.3f", wfs_results.focus);
 		wstandout(status_window);
-		mvwaddstr(status_window,8,20,"Astig: ");
+		mvwaddstr(status_window,8,20,"Astig   : ");
 		wstandend(status_window);
 		wprintw(status_window, "%6.3f %6.3f", 
 			wfs_results.a1, wfs_results.a2);
 		wstandout(status_window);
-		mvwaddstr(status_window,8,41,"Coma: ");
+		mvwaddstr(status_window,8,60,"Coma   : ");
 		wstandend(status_window);
 		wprintw(status_window, "%6.3f %6.3f", 
 			wfs_results.c1, wfs_results.c2);
@@ -2776,6 +2799,8 @@ void complete_aberrations_record(void)
 	fprintf(fp,"# GMT MONTH       : %d\n",month);
 	fprintf(fp,"# GMT DAY         : %d\n",day);
 	fprintf(fp,"# FSM STATE       : %d\n",aberrations_record[0].fsm_state);
+	fprintf(fp,"# DICHROIC        : %s\n",
+			dichroic_types[current_dichroic - 1]);
 	fprintf(fp,
 	"# Time     Tilt X  Tilt Y   Pos X   Pos Y   Focus    A1      A2      C1     C2\n");
 	
@@ -3059,4 +3084,99 @@ int toggle_use_servo_flat(int argc, char **argv)
 	return NOERROR;
 
 } /* toggle_use_servo_flat() */
+
+/************************************************************************/
+/* select_dichroic().							*/
+/*									*/
+/* Attempts to select a dichroic.					*/
+/************************************************************************/
+
+int select_dichroic(int argc, char **argv)
+{
+	int	dich;
+	struct smessage mess;
+
+        /* Check out the command line */
+
+        clean_command_line();
+        if (argc > 1)
+        {
+                for (dich=0; dich<3; dich++)
+                {
+                        if (strcmpi(argv[1],dichroic_types[dich]) == 0)
+                        {
+                                break;
+                        }
+                }
+
+                if (dich >= 3)
+                {
+                        error(ERROR,"Unkown dichroic %s.",argv[1]);
+                        return -2;
+                }
+        }
+        else
+        {
+		dich = current_dichroic - 1;
+                if (quick_edit("dichroic mirror",dichroic_types[dich],
+                        &dich,dichroic_types,ENUMERATED) == KEY_ESC)
+                                return NOERROR;
+	}
+
+	switch(dich+1)
+	{
+		case AOB_DICHROIC_GRAY: fsm_flat_dm = fsm_flat_dm_gray;
+					current_dichroic = AOB_DICHROIC_GRAY;
+					break;
+
+		case AOB_DICHROIC_SPARE: fsm_flat_dm = fsm_flat_dm_spare;
+					current_dichroic = AOB_DICHROIC_SPARE;
+					break;
+
+		case AOB_DICHROIC_YSO: fsm_flat_dm = fsm_flat_dm_yso;
+					current_dichroic = AOB_DICHROIC_YSO;
+					break;
+
+		default: return error(ERROR,"Unknown dichroic.");
+	}
+
+	mess.type = HUT_AOB_CHANGE_DICHROIC;
+	mess.length = sizeof(int);
+	mess.data = (unsigned char *)&current_dichroic;
+
+	if (!send_message(telescope_server, &mess))
+	{
+		return error(ERROR,"Failed ot send DICHROIC message to scope.");
+	}
+
+	return NOERROR;
+
+} /* select_dichroic() */
+
+/************************************************************************/
+/* message_aob_change_dichroic() 					*/
+/*									*/
+/************************************************************************/
+
+int message_aob_change_dichroic(struct smessage *message)
+{
+	int	data;
+	char	*argv[2];
+
+	if (message->length != sizeof(int))
+	{
+		return error(ERROR,"Got AOB_CHANGE_DICHROIC with wrong data.");
+	}
+
+	data = *((int *)message->data);
+
+	if (data < 1 || data > 3)
+		return error(ERROR,"Got non-existant Dichroic");
+
+	argv[0] = "dich";
+	argv[1] = dichroic_types[data-1];
+
+	return select_dichroic(2, argv);
+
+} /* message_aob_change_dichroic() */
 

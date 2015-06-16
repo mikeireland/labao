@@ -306,5 +306,8 @@ int toggle_use_reference(int argc, char **argv);
 int set_reference_now(int argc, char **argv);
 int toggle_use_servo_flat(int argc, char **argv);
 int start_scope_dichroic_mapping(int argc, char **argv);
+int select_dichroic(int argc, char **argv);
+int message_aob_change_dichroic(struct smessage *message);
+
 
 #endif

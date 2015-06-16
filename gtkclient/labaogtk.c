@@ -76,11 +76,15 @@ static GtkWidget *fsm_state_label;
 static char plot_aber = FALSE;
 static scope aber_scope;
 static GtkWidget *aber_button[7];
+static int gray = AOB_DICHROIC_GRAY;
+static int spare= AOB_DICHROIC_SPARE;
+static int yso  = AOB_DICHROIC_YSO;
 
 int main(int  argc, char *argv[] )
 {
 	GtkWidget *window;
 	GtkWidget *vbox;
+	GtkWidget *conf_vbox;
 	GtkWidget *bigvbox;
 	char	s[200];
 	char	*p;
@@ -466,20 +470,20 @@ int main(int  argc, char *argv[] )
 
 	/* make the configuration page */
 
-	vbox = gtk_vbox_new(FALSE, 0);
+	conf_vbox = gtk_vbox_new(FALSE, 0);
 	label = gtk_label_new("CONFIGURE");
 #ifdef GTK2
 	config_page = 
 #endif
 		gtk_notebook_append_page((GtkNotebook *)notebook, 
-		vbox, label);
+		conf_vbox, label);
 
 	/* Both the star and config need to go in here */
 
         hbox = gtk_hbox_new(FALSE, 0);
-        gtk_container_add (GTK_CONTAINER (vbox), hbox);
+        gtk_container_add (GTK_CONTAINER (conf_vbox), hbox);
         gtk_widget_show(hbox);
-        gtk_widget_show(vbox);
+        gtk_widget_show(conf_vbox);
 
 	/* First the star */
 
@@ -525,6 +529,51 @@ int main(int  argc, char *argv[] )
 	/* Try and ensure we're up to date */
 
 	get_and_display_star_and_config_callback(NULL, (gpointer)&server);
+
+	/* We need buttons to change the dichroic */
+
+        hbox = gtk_hbox_new(FALSE, 0);
+        gtk_container_add (GTK_CONTAINER (conf_vbox), hbox);
+        gtk_widget_show(hbox);
+	
+	label = gtk_label_new("Dichroic: ");
+        gtk_box_pack_start(GTK_BOX(hbox), label , TRUE, TRUE, 0);
+        gtk_widget_set_usize (label, LABAO_WIDTH/6, LABAO_HEIGHT);
+        gtk_widget_show(label);
+
+        button = gtk_button_new_with_label ("GRAY");
+	gtk_signal_connect(GTK_OBJECT (button), "clicked",
+            GTK_SIGNAL_FUNC (aob_dichroic_callback), (gpointer) &gray);
+        gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
+        gtk_container_set_border_width (GTK_CONTAINER(button),1);
+        gtk_widget_set_usize (button, LABAO_WIDTH/6, LABAO_HEIGHT);
+        gtk_widget_show(button);
+
+        button = gtk_button_new_with_label ("SPARE");
+	gtk_signal_connect(GTK_OBJECT (button), "clicked",
+            GTK_SIGNAL_FUNC (aob_dichroic_callback), (gpointer) &spare);
+        gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
+        gtk_container_set_border_width (GTK_CONTAINER(button),1);
+        gtk_widget_set_usize (button, LABAO_WIDTH/6, LABAO_HEIGHT);
+        gtk_widget_show(button);
+
+        button = gtk_button_new_with_label ("YSO");
+	gtk_signal_connect(GTK_OBJECT (button), "clicked",
+            GTK_SIGNAL_FUNC (aob_dichroic_callback), (gpointer) &yso);
+        gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
+        gtk_container_set_border_width (GTK_CONTAINER(button),1);
+        gtk_widget_set_usize (button, LABAO_WIDTH/6, LABAO_HEIGHT);
+        gtk_widget_show(button);
+
+	label = gtk_label_new("");
+        gtk_box_pack_start(GTK_BOX(hbox), label , TRUE, TRUE, 0);
+        gtk_widget_set_usize (label, LABAO_WIDTH/6, LABAO_HEIGHT);
+        gtk_widget_show(label);
+
+	label = gtk_label_new("");
+        gtk_box_pack_start(GTK_BOX(hbox), label , TRUE, TRUE, 0);
+        gtk_widget_set_usize (label, LABAO_WIDTH/6, LABAO_HEIGHT);
+        gtk_widget_show(label);
 
 	/* and show the window */
 
@@ -866,28 +915,40 @@ void update_wfs_results(void)
 	sprintf(s,"C1: %+5.2f", wfs_results.c1);
 	gtk_label_set_text((GtkLabel *) c2_label, s);
 
+	switch(wfs_results.current_dichroic)
+	{
+		case AOB_DICHROIC_GRAY: strcpy(s, "Dichroic GRAY - ");
+					break;
+
+		case AOB_DICHROIC_SPARE: strcpy(s, "Dichroic SPARE - ");
+					break;
+
+		case AOB_DICHROIC_YSO: strcpy(s, "Dichroic YSO - ");
+					break;
+
+		default: strcpy(s, "Dichroic UNKNOWN - ");
+					break;
+	}
+
+
 	switch (wfs_results.fsm_state)
         {
-                case FSM_CENTROIDS_ONLY:
-                        gtk_label_set_text((GtkLabel *)fsm_state_label,
-				"WFS only");
+                case FSM_CENTROIDS_ONLY: strcat(s, "WFS Only");
                         break;
-                case FSM_ZERO_CENTROIDS:
-                        gtk_label_set_text((GtkLabel *)fsm_state_label,
-				"Zero Cent");
+
+                case FSM_ZERO_CENTROIDS: strcat(s, "Zero Cent");
                         break;
-                case FSM_MEASURE_RECONSTRUCTOR:
-			gtk_label_set_text((GtkLabel *) fsm_state_label, 
-				"Reconst");
+
+                case FSM_MEASURE_RECONSTRUCTOR: strcat(s, "Reconst");
                         break;
-                case FSM_SERVO_LOOP:
-                        gtk_label_set_text((GtkLabel *)fsm_state_label,
-				"Servo ON");
+
+                case FSM_SERVO_LOOP: strcat(s, "Servo ON");
                         break;
-                default:
-                        gtk_label_set_text((GtkLabel *)fsm_state_label,
-				"UNKNOWN");
+
+                default: strcat(s, "UNKNOWN");
         }
+
+	gtk_label_set_text((GtkLabel *)fsm_state_label, s);
 
 	if (plot_aber)
 	{
@@ -978,3 +1039,24 @@ void labao_plot_aber_callback(GtkButton *button, gpointer user_data)
 	}
 
 } /* labao_plot_aber_callback() */
+
+/************************************************************************/
+/* aob_dichroic_callback()                                              */
+/*                                                                      */
+/************************************************************************/
+
+void aob_dichroic_callback(GtkButton *button, gpointer data)
+{
+        struct smessage mess;
+
+        mess.type = HUT_AOB_CHANGE_DICHROIC;
+        mess.length = sizeof(int);
+        mess.data = (unsigned char *)data;
+
+        if (!send_message(server, &mess))
+        {
+          print_status(ERROR,
+                "Failed to send HUT_AOB_CHANGE_DICHROIC message.\n");
+        }
+
+} /* aob_dichroic_callback() */

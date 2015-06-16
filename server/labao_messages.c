@@ -114,6 +114,7 @@ void setup_standard_labao_messages(void)
         ui_add_message_job(LABAO_ZERO_WFS_ABERRATION, 
 		message_labao_zero_wfs_aberration);
         ui_add_message_job(LABAO_SET_FPS, message_labao_set_fps);
+        ui_add_message_job(HUT_AOB_CHANGE_DICHROIC,message_aob_change_dichroic);
 
 } /* setup_standard_labao_messages() */
 

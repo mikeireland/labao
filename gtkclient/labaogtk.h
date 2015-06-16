@@ -87,6 +87,7 @@ void status_page_callback(void);
 void print_usage_message(char *name);
 void update_wfs_results(void);
 void labao_plot_aber_callback(GtkButton *button, gpointer user_data);
+void aob_dichroic_callback(GtkButton *button, gpointer data);
 
 /* messages.c */
 

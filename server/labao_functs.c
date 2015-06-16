@@ -144,5 +144,8 @@ struct {
 		{"setref",     	set_reference_now},
 		{"tusf",     	toggle_use_servo_flat},
 		{"dichmap",     start_scope_dichroic_mapping},
+		{"dichroic",	select_dichroic},
+		{"dich",	select_dichroic},
+
 
 		{NULL,		NULL}	};
