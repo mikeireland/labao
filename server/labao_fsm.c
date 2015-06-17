@@ -40,7 +40,8 @@
 #define LAB_ALIGN_LIMIT		0.01
 #define LAB_ALIGN_STEP		50
 #define SCOPE_ALIGN_LIMIT	0.05
-#define SCOPE_ALIGN_STEP	100
+#define SCOPE_ALIGN_STEP	100 
+#define SCOPE_ALIGN_GAIN	300
 #define ZERNIKE_ALIGN_LIMIT	0.075
 #define ZERNIKE_ALIGN_STEP	0.005
 
@@ -1650,6 +1651,7 @@ int fsm_status(void)
 				/* Write out the autoalign total from the last alignment */
 				fprintf(scope_dichroic_mapping_file, "1 %5.1f %6.2f %6.2f\n", 
 				 telescope_status.az, autoalign_x_total, autoalign_y_total);
+				fflush(scope_dichroic_mapping_file);
 				/* Time to rotate the telescope */
 				scope_dichroic_mapping_step = DICHROIC_MAPPING_ROTATE;
 				pos.el = telescope_status.el;
@@ -1826,6 +1828,7 @@ int fsm_status(void)
 				}
 				fprintf(scope_dichroic_mapping_file, "0 %5.1f %6.2f %6.2f\n", 
 				 telescope_status.az, autoalign_x_total, autoalign_y_total);
+				fflush(scope_dichroic_mapping_file);
 				pthread_mutex_unlock(&fsm_mutex);
 				return NOERROR;
 			}
@@ -1837,33 +1840,33 @@ int fsm_status(void)
 			mess.data = (unsigned char *)&motor_move;
 
 			/* First we need to rotate into the right frame */
-
-			theta = (telescope_status.az + 8.0)/180.0*M_PI;
-			x = cos(theta) * wfs_results.xtilt -
+#warning Despite this being totally wrong in principle (120 degree offset between axes) there used to be an 8 degrees below82
+			theta = -telescope_status.az/180.0*M_PI;
+			x = - cos(theta) * wfs_results.xtilt +
 			    sin(theta) * wfs_results.ytilt;
-			y = sin(theta) * wfs_results.xtilt -
+			y = - sin(theta) * wfs_results.xtilt -
 			    cos(theta) * wfs_results.ytilt;
 
 			/* Tell the user */
 
-			sprintf(s, "%d X = %.2f/%.2f Y = %.2f/%.2f -", 
-			autoalign_count+1, 
+			sprintf(s, "Az %5.1f %d X = %.2f/%.2f Y = %.2f/%.2f -", 
+			telescope_status.az, autoalign_count+1, 
 			wfs_results.xtilt, x, wfs_results.ytilt, y);
 			if (autoalign_count % 2)
 			{
 			    if (x > SCOPE_ALIGN_LIMIT)
 			    {
 				motor_move.motor = AOB_DICHR_2;
-				motor_move.position = SCOPE_ALIGN_STEP;
-				autoalign_x_total += SCOPE_ALIGN_STEP;
+				motor_move.position = SCOPE_ALIGN_STEP + (int)(fabs(x)*SCOPE_ALIGN_GAIN);
+				autoalign_x_total += SCOPE_ALIGN_STEP + (int)(fabs(x)*SCOPE_ALIGN_GAIN);
 				send_message(telescope_server, &mess);
 				strcat(s," Moving RIGHT");
 			    }
 			    else if (x < -1.0*SCOPE_ALIGN_LIMIT)
 			    {
 				motor_move.motor = AOB_DICHR_2;
-				motor_move.position = -1.0*SCOPE_ALIGN_STEP;
-				autoalign_x_total -= SCOPE_ALIGN_STEP;
+				motor_move.position = -1.0*(SCOPE_ALIGN_STEP  + (int)(fabs(x)*SCOPE_ALIGN_GAIN));
+				autoalign_x_total -= SCOPE_ALIGN_STEP  + (int)(fabs(x)*SCOPE_ALIGN_GAIN);
 				send_message(telescope_server, &mess);
 				strcat(s," Moving LEFT");
 			    }
@@ -1877,16 +1880,16 @@ int fsm_status(void)
 			    if (y > SCOPE_ALIGN_LIMIT)
 			    {
 				motor_move.motor = AOB_DICHR_1;
-				motor_move.position = SCOPE_ALIGN_STEP;
-				autoalign_y_total += SCOPE_ALIGN_STEP;
+				motor_move.position = SCOPE_ALIGN_STEP + (int)(fabs(y)*SCOPE_ALIGN_GAIN);
+				autoalign_y_total += SCOPE_ALIGN_STEP + (int)(fabs(y)*SCOPE_ALIGN_GAIN); 
 				send_message(telescope_server, &mess);
 				strcat(s," Moving UP");
 			    }
 			    else if (y < -1.0 * SCOPE_ALIGN_LIMIT)
 			    {
 				motor_move.motor = AOB_DICHR_1;
-				motor_move.position = -1.0*SCOPE_ALIGN_STEP;
-				autoalign_y_total -= SCOPE_ALIGN_STEP;
+				motor_move.position = -1.0*(SCOPE_ALIGN_STEP + (int)(fabs(y)*SCOPE_ALIGN_GAIN));
+				autoalign_y_total -= SCOPE_ALIGN_STEP + (int)(fabs(y)*SCOPE_ALIGN_GAIN);
 				send_message(telescope_server, &mess);
 				strcat(s," Moving DOWN");
 			    }
@@ -2019,7 +2022,7 @@ int fsm_status(void)
 		wprintw(status_window, "%6.3f %6.3f", 
 			wfs_results.a1, wfs_results.a2);
 		wstandout(status_window);
-		mvwaddstr(status_window,8,60,"Coma   : ");
+		mvwaddstr(status_window,8,41,"Coma   : ");
 		wstandend(status_window);
 		wprintw(status_window, "%6.3f %6.3f", 
 			wfs_results.c1, wfs_results.c2);
@@ -2315,7 +2318,7 @@ int edit_wfs_results_num(int argc, char **argv)
 /************************************************************************/
 /* start_scope_dichroic_mapping()					*/
 /*									*/
-/* Starts the automated mapping routine.			*/
+/* Starts the automated mapping routine.				*/
 /************************************************************************/
 
 int start_scope_dichroic_mapping(int argc, char **argv)
@@ -2323,6 +2326,10 @@ int start_scope_dichroic_mapping(int argc, char **argv)
 	char *args[2], filename[80], data_dir[80];
 	/* Sanity check here so we don't get ourselves stuck. */
 	if (scope_dichroic_mapping) return error(ERROR, "Already mapping the scope dichroic positions.");
+
+	/* Make sure we start off close to 0 azimuth */
+	if (telescope_status.az > 80)
+	 return error(ERROR, "Telescope azimuth must be between 0.1 and 80 degrees to start!");
 
 	sprintf(filename, "%s/%s_dich_map.dat", get_data_directory(data_dir), labao_name);
 	if ( (scope_dichroic_mapping_file = fopen(filename, "w")) == NULL ) 
