@@ -1640,7 +1640,7 @@ int fsm_status(void)
 	if (scope_dichroic_mapping) {
 		if ( (scope_dichroic_mapping_step == DICHROIC_MAPPING_ALIGN) && (!autoalign_scope_dichroic) ){
 			/* Have we moved all the way around? */
-			if (fmod(telescope_status.az - initial_mapping_az + 10.1  + 360,360) < 10.0){
+			if (fmod(telescope_status.az - initial_mapping_az + 15  + 360,360) < 10.0){
 				scope_dichroic_mapping = FALSE;
 				fclose(scope_dichroic_mapping_file);
 				message(system_window,
@@ -2329,8 +2329,8 @@ int start_scope_dichroic_mapping(int argc, char **argv)
 	if (scope_dichroic_mapping) return error(ERROR, "Already mapping the scope dichroic positions.");
 
 	/* Make sure we start off close to 0 azimuth */
-	if ((telescope_status.az > 80) && (telescope_status.az >= 0.1))
-	 return error(ERROR, "Telescope azimuth must be between 0.1 and 80 degrees to start!");
+	if ((telescope_status.az > 85) && (telescope_status.az < 275))
+	 return error(ERROR, "Telescope azimuth must be within 85 degrees of North to start!");
 
 	sprintf(filename, "%s/%s_dich_map.dat", get_data_directory(data_dir), labao_name);
 	if ( (scope_dichroic_mapping_file = fopen(filename, "w")) == NULL ) 
@@ -2500,6 +2500,10 @@ int stop_autoalign(int argc, char **argv)
 	autoalign_scope_dichroic = FALSE;
 	autoalign_zernike = FALSE;
 	use_reference = FALSE;
+    if (scope_dichroic_mapping){
+			scope_dichroic_mapping = FALSE;
+			fclose(scope_dichroic_mapping_file);
+	}
 
 	message(system_window, "Auto alignment has been stopped.");
 
