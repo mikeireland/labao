@@ -56,7 +56,8 @@ OFILES = labao.o\
 	 labao_edac40.o\
 	 labao_zernike.o\
 	 labao_usb_camera.o\
-	 labao_fsm.o
+	 labao_fsm.o\
+	 labao_tiptilt_data_socket.o
 
 .c.o:
 	${CC} -c ${LCFLAGS} $<

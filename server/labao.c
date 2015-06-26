@@ -16,6 +16,8 @@
 /* 4.3 - Recompiled for Centos 7 and doesn't try to close USB cam.	*/
 /* 4.4 - Added new servo type, and averaging for flats.			*/
 /* 4.5 - Frame summing added						*/
+/* 5.0 - Different DM shapes for dichroics and different centroids	*/
+/*	 for reference and beacon.					*/
 /************************************************************************/
 /*                                                                      */
 /*                    CHARA ARRAY USER INTERFACE			*/
@@ -69,6 +71,7 @@ float servo_damping_delta = SERVO_DAMPING_DELTA;
 float    xpos_center = 0.0;
 float    ypos_center = 0.0;
 struct s_scope_status telescope_status;
+bool send_tiptilt = FALSE;
 
 int main(int argc, char **argv)
 {
@@ -147,7 +150,7 @@ int main(int argc, char **argv)
 	ui_clear_screen();
 	put_line("");
 
-	sprintf(title,"%s 4.5",labao_name);
+	sprintf(title,"%s 5.0",labao_name);
 	center_line(title);
 	put_line("");
 	center_line("The CHARA Array");
@@ -264,6 +267,10 @@ void labao_open(void)
 	/* Set default frame rate */
 
 	set_frame_rate(DEFAULT_FRAME_RATE);
+
+	/* Try and open the tiptilt comms */
+
+	call_open_labao_tiptilt_data_socket(0, NULL);
 
 	/* Open display */
 

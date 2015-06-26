@@ -87,3 +87,24 @@ Check that we mention the S2WFS shutter
 2015_06_09 Need to be able to change which file we use for defaults. IE change
 between White light, laser and Blue LED zero points. PErhaps this can be done
 on the fly?
+
+2015_06_25
+----------
+
+Notes from John:
+
+        Calibrating transfer matrices
+
+took wavefront sensor data in UT 2015 Jun 17 data directory
+004: az 69.8degs.  peak correlation for y-> -y, rotation = +5.0 degs 
+005: az 172.2        peak correlation for y-> -y, pa = +106.0 degs
+
+formula:
+  x(TELWFS) = x(LABWFS) * cos( theta) + y(LABWFS)*sin(theta)
+  y(TELWFS) = x(LABWFS) * sin(theta)  - y(LABWFS)*cos(theta)
+
+theta = TELESCOPE AZIMUTH - 65.5 degs  ( errors +/- 1 deg)
+
+
+Theo: Looks like a gain of 0.15 on X and -0.15 on Y works.....
+

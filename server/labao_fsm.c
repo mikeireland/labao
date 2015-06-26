@@ -109,7 +109,6 @@ static pthread_mutex_t fsm_mutex = PTHREAD_MUTEX_INITIALIZER;
 static int actuator=1;
 static int wfs_results_num = ((int)DEFAULT_FRAME_RATE);
 static int wfs_results_n = 0;
-static struct s_labao_wfs_results wfs_reference;
 static bool autoalign_lab_dichroic = FALSE;
 static bool autoalign_scope_dichroic = FALSE;
 
@@ -137,15 +136,18 @@ static float x_mean_offset=0.0, y_mean_offset=0.0, max_offset=1.0;
 static float aberration_xc[NUM_LENSLETS];
 static float aberration_yc[NUM_LENSLETS];
 static bool use_reference = FALSE;
-static bool set_reference = FALSE;
 static bool use_servo_flat = TRUE;
 
 /* Globals. */
 
 int fsm_state = FSM_CENTROIDS_ONLY;
 int current_dichroic = AOB_DICHROIC_SPARE;
-float x_centroid_offsets[NUM_LENSLETS];
-float y_centroid_offsets[NUM_LENSLETS];
+float x_centroid_offsets_beacon[NUM_LENSLETS];
+float y_centroid_offsets_beacon[NUM_LENSLETS];
+float x_centroid_offsets_reference[NUM_LENSLETS];
+float y_centroid_offsets_reference[NUM_LENSLETS];
+float *x_centroid_offsets;
+float *y_centroid_offsets;
 float xc[NUM_LENSLETS];
 float yc[NUM_LENSLETS];
 float avg_fluxes[NUM_LENSLETS];
@@ -185,16 +187,6 @@ void initialize_fsm(void)
 
 	wfs_results_n = 0;
 
-	wfs_reference.xtilt = 0.0;
-	wfs_reference.ytilt = 0.0;
-	wfs_reference.xpos = 0.0;
-	wfs_reference.ypos = 0.0;
-	wfs_reference.focus = 0.0;
-	wfs_reference.a1 = 0.0;
-	wfs_reference.a2 = 0.0;
-	wfs_reference.c1 = 0.0;
-	wfs_reference.c2 = 0.0;
-
 	for (i=0; i<NUM_ACTUATORS; i++)
 	for (j=0; j<2*NUM_LENSLETS; j++)
 	{
@@ -217,11 +209,15 @@ void initialize_fsm(void)
 
 	for (i=0;i<NUM_LENSLETS;i++)
 	{
-		x_centroid_offsets[i]=0.0;
-		y_centroid_offsets[i]=0.0;
+		x_centroid_offsets_beacon[i]=0.0;
+		y_centroid_offsets_beacon[i]=0.0;
+		x_centroid_offsets_reference[i]=0.0;
+		y_centroid_offsets_reference[i]=0.0;
 		aberration_xc[i]=0.0;
 		aberration_yc[i]=0.0;
 	}
+	x_centroid_offsets = x_centroid_offsets_beacon;
+	y_centroid_offsets = y_centroid_offsets_beacon;
 
 	for (i=0;i<CENTROID_WINDOW_WIDTH;i++)
 	for (j=0;j<CENTROID_WINDOW_WIDTH;j++)
@@ -300,7 +296,8 @@ int load_defaults(char* filename_in)
 	char filename[256], s[256];
 	FILE *params_file;
 	int x,y,dx,dy,i;
-	float xoff, yoff;
+	float xoff_beacon, yoff_beacon;
+	float xoff_reference, yoff_reference;
 
 	if (filename_in != NULL)
 	{
@@ -335,18 +332,29 @@ int load_defaults(char* filename_in)
 			return -3;
 		}
 
-		if (sscanf(s, "%f %f", &xoff, &yoff) != 2)
+		if (sscanf(s, "%f %f %f %f", &xoff_beacon, &yoff_beacon,
+			&xoff_reference, &yoff_reference) != 4)
 		{
 			fclose(params_file);
 			return -4;
 		}
+
 		/* Sanity check these numbers */
-		if ((xoff < CLEAR_EDGE) || (yoff < CLEAR_EDGE) || 
-		    (xoff >= dx-CLEAR_EDGE) || (yoff >= dy-CLEAR_EDGE)){
-			return -8;
-		}
-		x_centroid_offsets[i] = xoff;
-		y_centroid_offsets[i] = yoff;
+
+		if ((xoff_beacon < CLEAR_EDGE) || 
+		    (yoff_beacon < CLEAR_EDGE) || 
+		    (xoff_beacon >= dx-CLEAR_EDGE) || 
+		    (yoff_beacon >= dy-CLEAR_EDGE)) return -8;
+
+		if ((xoff_reference < CLEAR_EDGE) || 
+		    (yoff_reference < CLEAR_EDGE) || 
+		    (xoff_reference >= dx-CLEAR_EDGE) || 
+		    (yoff_reference >= dy-CLEAR_EDGE)) return -8;
+
+		x_centroid_offsets_beacon[i] = xoff_beacon;
+		y_centroid_offsets_beacon[i] = yoff_beacon;
+		x_centroid_offsets_reference[i] = xoff_reference;
+		y_centroid_offsets_reference[i] = yoff_reference;
 	}
 	/* Compute the new pupil center and scale. */
 	compute_pupil_center();
@@ -399,56 +407,6 @@ int load_defaults(char* filename_in)
 	 */
 
 	if (set_usb_camera_aoi(x, y, dx, dy)) return -5;
-
-	/* Get the reference beam information */
-
-	wfs_reference.xtilt = 0.0;
-	wfs_reference.ytilt = 0.0;
-	wfs_reference.xpos = 0.0;
-	wfs_reference.ypos = 0.0;
-	wfs_reference.focus = 0.0;
-	wfs_reference.a1 = 0.0;
-	wfs_reference.a2 = 0.0;
-	wfs_reference.c1 = 0.0;
-	wfs_reference.c2 = 0.0;
-
-	if (GetDataLine(s, 80, params_file) == -1)
-	{
-		fclose(params_file);
-		return -11;
-	}
-
-	if (sscanf(s, "%f %f", &(wfs_reference.xtilt), &(wfs_reference.ytilt)) != 2)
-	{
-		fclose(params_file);
-		return -11;
-	}
-
-	if (GetDataLine(s, 80, params_file) == -1)
-	{
-		fclose(params_file);
-		return -11;
-	}
-
-	if (sscanf(s, "%f %f", &(wfs_reference.xpos), &(wfs_reference.ypos)) != 2)
-	{
-		fclose(params_file);
-		return -11;
-	}
-
-	if (GetDataLine(s, 80, params_file) == -1)
-	{
-		fclose(params_file);
-		return -11;
-	}
-
-	if (sscanf(s, "%f %f %f", &(wfs_reference.focus), &(wfs_reference.a1), &(wfs_reference.a2)) != 3)
-	{
-		fclose(params_file);
-		return -11;
-	}
-
-#warning Coma terms need to be here too.
 
 	fclose(params_file);
 
@@ -556,11 +514,15 @@ int save_defaults(char* filename_in)
 
 	/* Now go through the lenslets offsets */
 
-	fprintf(params_file, "# Default Lenslet X/Y positions.\n");
+	fprintf(params_file, 
+		"# Default Lenslet X/Y positions. Beacon then Reference\n");
   	for (i=0;i<NUM_LENSLETS;i++)
 	{
-		fprintf(params_file, "%7.2f %7.2f\n",
-			x_centroid_offsets[i], y_centroid_offsets[i]);
+		fprintf(params_file, "%7.2f %7.2f %7.2f %7.2f\n",
+			x_centroid_offsets_beacon[i], 
+			y_centroid_offsets_beacon[i],
+			x_centroid_offsets_reference[i],
+			y_centroid_offsets_reference[i]);
 	}
 
 	/* Save the "flat" wavefront definition */
@@ -579,19 +541,6 @@ int save_defaults(char* filename_in)
 
 	fprintf(params_file, "# Default center position for pupil\n");
 	fprintf(params_file, "%f %f\n", xpos_center, ypos_center);
-
-	/* Reference position */
-
-	fprintf(params_file, "# Reference position Tilt\n");
-	fprintf(params_file, "%f %f\n", wfs_reference.xtilt, wfs_reference.ytilt);
-
-	fprintf(params_file, "# Reference position Position\n");
-	fprintf(params_file, "%f %f\n", wfs_reference.xpos, wfs_reference.ypos);
-
-	fprintf(params_file, "# Reference position Focus and Astigamtism\n");
-	fprintf(params_file, "%f %f %f\n", wfs_reference.focus, wfs_reference.a1, wfs_reference.a2);
-
-#warning Coma terms need to be here too.
 
 	/* That is all. */
 
@@ -839,8 +788,10 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 	bool is_new_actuator=TRUE;
 	float outer_dm_mean = 0.0;
 	float x_offset = 0.0, y_offset = 0.0, total_flux = 0.0;
-	float	xtilt = 0.0, ytilt = 0.0, focus = 0.0, a1 = 0.0, a2 = 0.0, c1=0.0, c2=0.0;
+	float	xtilt = 0.0, ytilt = 0.0, focus = 0.0;
+	float   a1 = 0.0, a2 = 0.0, c1=0.0, c2=0.0;
 	float	xpos = 0.0, ypos = 0.0;
+	float	xwfs, ywfs, theta, sintheta, costheta;
 
 	/* First, compute the centroids. */
 
@@ -1268,6 +1219,7 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 
 		/* To compute the pupil position, reference everything
 		to the center of the pupil. */
+
 		xpos += x_offset * avg_fluxes[i];
 		ypos += y_offset * avg_fluxes[i];
 
@@ -1276,12 +1228,13 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 		focus += (xc[i]*x_offset + yc[i]*y_offset);
 		a1 +=    (xc[i]*x_offset - yc[i]*y_offset);
 		a2 +=    (yc[i]*x_offset + xc[i]*y_offset);
-		c1 +=  xc[i]*(9*x_offset*x_offset + 3*y_offset*y_offset - 2)/9.0 + 
+		c1 +=  xc[i]*(9*x_offset*x_offset + 3*y_offset*y_offset-2)/9.0 + 
 			yc[i]*2*x_offset*y_offset/3.0;
-		c2 +=  yc[i]*(9*y_offset*y_offset + 3*x_offset*x_offset - 2)/9.0 + 
+		c2 +=  yc[i]*(9*y_offset*y_offset + 3*x_offset*x_offset-2)/9.0 + 
 			xc[i]*2*x_offset*y_offset/3.0;
 	}
 	current_total_flux = total_flux;
+
 	/* This is the old method.... */
 
 	/*
@@ -1304,6 +1257,17 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 	c1 /= (float)NUM_LENSLETS;
 	c2 /= (float)NUM_LENSLETS;
 	
+	/* And now we send the tiptilt away */
+
+	theta = M_PI*(telescope_status.az - 65.5)/180.0;
+	sintheta = sin(theta);
+	costheta = cos(theta);
+	xwfs = xtilt * costheta + ytilt * sintheta;
+	ywfs = xtilt * sintheta - ytilt * costheta;
+
+	send_labao_tiptilt_data(xwfs, ywfs);
+
+	/* Calculate the position.... this doesn't work well */
 
 	if (total_flux > ZERO_CLAMP)
 	{
@@ -1398,33 +1362,6 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
                         fsm_calc_mean_dm[i] = 0.0;
                 }
 
-		if (set_reference)
-		{
-			wfs_reference.xtilt = wfs_results.xtilt;
-			wfs_reference.ytilt = wfs_results.ytilt;
-			wfs_reference.xpos = wfs_results.xpos;
-			wfs_reference.ypos = wfs_results.ypos;
-			wfs_reference.focus = wfs_results.focus;
-			wfs_reference.a1 = wfs_results.a1;
-			wfs_reference.a2 = wfs_results.a2;
-			wfs_reference.c1 = wfs_results.c1;
-			wfs_reference.c2 = wfs_results.c2;
-			set_reference = FALSE;
-		}
-		calc_labao_results.xtilt = 0.0;
-
-		if (use_reference)
-		{
-			wfs_results.xtilt -= wfs_reference.xtilt;
-			wfs_results.ytilt -= wfs_reference.ytilt;
-			wfs_results.xpos -= wfs_reference.xpos;
-			wfs_results.ypos -= wfs_reference.ypos;
-			wfs_results.focus -= wfs_reference.focus;
-			wfs_results.a1 -= wfs_reference.a1;
-			wfs_results.a2 -= wfs_reference.a2;
-			wfs_results.c1 -= wfs_reference.c1;
-			wfs_results.c2 -= wfs_reference.c2;
-		}
 		calc_labao_results.xtilt = 0.0;
 		calc_labao_results.ytilt = 0.0;
 		calc_labao_results.xpos = 0.0;
@@ -1629,12 +1566,18 @@ int fsm_status(void)
 	wprintw(status_window, "%9d", wfs_results_num);
 
 	wstandout(status_window);
-	mvwaddstr(status_window,4,20,"Beam    : ");
+	mvwaddstr(status_window,4,20,"Beam/TT : ");
 	wstandend(status_window);
 	if (use_reference)
-		wprintw(status_window, "%9s", "Reference");
+		sprintf(s, "%6s", "Ref");
 	else
-		wprintw(status_window, "%9s", "Beacon");
+		sprintf(s, "%6s", "Beacon");
+
+	if (send_tiptilt)
+		strcat(s,"/ON ");
+	else
+		strcat(s,"/OFF ");
+	wprintw(status_window, s );
 
 	/* Check on the scope_dichroic_mapping function */
 	if (scope_dichroic_mapping) {
@@ -1714,7 +1657,7 @@ int fsm_status(void)
 					"Lab Autoalignment is complete.");
 				send_labao_text_message("%s", 
 					"Lab Autoalignment is complete.");
-				use_reference = FALSE;
+				use_reference_off();
 				pthread_mutex_unlock(&fsm_mutex);
 				return NOERROR;
 			}
@@ -1858,16 +1801,20 @@ int fsm_status(void)
 			    if (x > SCOPE_ALIGN_LIMIT)
 			    {
 				motor_move.motor = AOB_DICHR_2;
-				motor_move.position = SCOPE_ALIGN_STEP + (int)(fabs(x)*SCOPE_ALIGN_GAIN);
-				autoalign_x_total += SCOPE_ALIGN_STEP + (int)(fabs(x)*SCOPE_ALIGN_GAIN);
+				motor_move.position = SCOPE_ALIGN_STEP + 
+					(int)(fabs(x)*SCOPE_ALIGN_GAIN);
+				autoalign_x_total += SCOPE_ALIGN_STEP + 
+					(int)(fabs(x)*SCOPE_ALIGN_GAIN);
 				send_message(telescope_server, &mess);
 				strcat(s," Moving RIGHT");
 			    }
 			    else if (x < -1.0*SCOPE_ALIGN_LIMIT)
 			    {
 				motor_move.motor = AOB_DICHR_2;
-				motor_move.position = -1.0*(SCOPE_ALIGN_STEP  + (int)(fabs(x)*SCOPE_ALIGN_GAIN));
-				autoalign_x_total -= SCOPE_ALIGN_STEP  + (int)(fabs(x)*SCOPE_ALIGN_GAIN);
+				motor_move.position = -1.0*(SCOPE_ALIGN_STEP  + 
+					(int)(fabs(x)*SCOPE_ALIGN_GAIN));
+				autoalign_x_total -= SCOPE_ALIGN_STEP  + 
+					(int)(fabs(x)*SCOPE_ALIGN_GAIN);
 				send_message(telescope_server, &mess);
 				strcat(s," Moving LEFT");
 			    }
@@ -1881,16 +1828,20 @@ int fsm_status(void)
 			    if (y > SCOPE_ALIGN_LIMIT)
 			    {
 				motor_move.motor = AOB_DICHR_1;
-				motor_move.position = SCOPE_ALIGN_STEP + (int)(fabs(y)*SCOPE_ALIGN_GAIN);
-				autoalign_y_total += SCOPE_ALIGN_STEP + (int)(fabs(y)*SCOPE_ALIGN_GAIN); 
+				motor_move.position = SCOPE_ALIGN_STEP + 
+					(int)(fabs(y)*SCOPE_ALIGN_GAIN);
+				autoalign_y_total += SCOPE_ALIGN_STEP + 
+					(int)(fabs(y)*SCOPE_ALIGN_GAIN); 
 				send_message(telescope_server, &mess);
 				strcat(s," Moving UP");
 			    }
 			    else if (y < -1.0 * SCOPE_ALIGN_LIMIT)
 			    {
 				motor_move.motor = AOB_DICHR_1;
-				motor_move.position = -1.0*(SCOPE_ALIGN_STEP + (int)(fabs(y)*SCOPE_ALIGN_GAIN));
-				autoalign_y_total -= SCOPE_ALIGN_STEP + (int)(fabs(y)*SCOPE_ALIGN_GAIN);
+				motor_move.position = -1.0*(SCOPE_ALIGN_STEP + 
+					(int)(fabs(y)*SCOPE_ALIGN_GAIN));
+				autoalign_y_total -= SCOPE_ALIGN_STEP + 
+					(int)(fabs(y)*SCOPE_ALIGN_GAIN);
 				send_message(telescope_server, &mess);
 				strcat(s," Moving DOWN");
 			    }
@@ -2396,7 +2347,7 @@ int start_autoalign_lab_dichroic(int argc, char **argv)
 
 	/* We need the reference offsets */
 
-	use_reference = TRUE;
+	use_reference_on();
 
 	/* Go */
 
@@ -2441,7 +2392,7 @@ int start_autoalign_scope_dichroic(int argc, char **argv)
 
 	autoalign_x_total = 0.0;
 	autoalign_y_total = 0.0;
-	use_reference = FALSE;
+	use_reference_off();
 	autoalign_scope_dichroic = TRUE;
 
 	return NOERROR;
@@ -2480,7 +2431,7 @@ int start_autoalign_zernike(int argc, char **argv)
 		autoalign_count);
 
 	fsm_state = FSM_CENTROIDS_ONLY;
-	use_reference = FALSE;
+	use_reference_off();
 	call_load_zernike(0, NULL);
 	autoalign_zernike = TRUE;
 
@@ -2499,8 +2450,8 @@ int stop_autoalign(int argc, char **argv)
 	autoalign_lab_dichroic = FALSE;
 	autoalign_scope_dichroic = FALSE;
 	autoalign_zernike = FALSE;
-	use_reference = FALSE;
-    if (scope_dichroic_mapping){
+	use_reference_off();
+        if (scope_dichroic_mapping){
 			scope_dichroic_mapping = FALSE;
 			fclose(scope_dichroic_mapping_file);
 	}
@@ -3032,10 +2983,10 @@ int add_wfs_aberration(int zernike, float amplitude)
 
 int toggle_use_reference(int argc, char **argv)
 {
-	use_reference = !use_reference;
 
-	if (use_reference)
+	if (!use_reference)
 	{
+		use_reference_on();
 		message(system_window, 
 			"Using reference mirror offsets.");
 		send_labao_text_message(
@@ -3043,6 +2994,7 @@ int toggle_use_reference(int argc, char **argv)
 	}
 	else
 	{
+		use_reference_off();
 		message(system_window, 
 			"Not using reference mirror offsets.");
 		send_labao_text_message(
@@ -3054,23 +3006,32 @@ int toggle_use_reference(int argc, char **argv)
 } /* toggle_use_reference() */
 
 /************************************************************************/
-/* set_reference_now()							*/
+/* use_reference_on()							*/
 /*									*/
-/* Tells system to set current position to reference position.		*/
+/* Force us to use teh reference centroids.				*/
 /************************************************************************/
 
-int set_reference_now(int argc, char **argv)
+void use_reference_on(void)
 {
-	set_reference = TRUE;
+	use_reference = TRUE;
+	x_centroid_offsets = x_centroid_offsets_reference;
+	y_centroid_offsets = y_centroid_offsets_reference;
 
-	message(system_window, 
-		"Reference mirror offsets set to current position.");
-	send_labao_text_message(
-		"Reference mirror offsets set to current position.");
+} /* use_reference_on */
 
-	return NOERROR;
+/************************************************************************/
+/* use_reference_off()							*/
+/*									*/
+/* Force us to use the beacon centroids.				*/
+/************************************************************************/
 
-} /* set_reference_now() */
+void use_reference_off(void)
+{
+	use_reference = FALSE;
+	x_centroid_offsets = x_centroid_offsets_beacon;
+	y_centroid_offsets = y_centroid_offsets_beacon;
+
+} /* use_reference_off */
 
 /************************************************************************/
 /* toggle_use_servo_flat()						*/

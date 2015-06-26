@@ -32,8 +32,8 @@
 /* How many frames do we need in the ring buffer? */
 
 #define NUM_IMAGE_MEM 	50
-#define USB_DISP_X	320
-#define USB_DISP_Y	256 /* !!! Must be a multiple of 2 */
+#define USB_DISP_X	640
+#define USB_DISP_Y	512 /* !!! Must be a multiple of 2 */
 #define MAX_FILE_NUMBER	999
 #define SECS_FOR_PROC  2
 #define NUM_MIN 20 /*The number of minimum pixels in each row to average over */

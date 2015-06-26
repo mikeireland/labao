@@ -343,9 +343,42 @@ int main(int  argc, char *argv[] )
         gtk_widget_set_usize (c2_label, 3*LABAO_WIDTH/24, LABAO_HEIGHT);
         gtk_widget_show(c2_label);
 
+        hbox = gtk_hbox_new(FALSE, 0);
+        gtk_container_add (GTK_CONTAINER (vbox), hbox);
+        gtk_widget_show(hbox);
+
+        /* Add tiptilt control buttons */
+
+        button = gtk_button_new_with_label ("REOPEN TT");
+        gtk_signal_connect (GTK_OBJECT (button), "clicked",
+		GTK_SIGNAL_FUNC (labao_message_callback),
+                (gpointer)(message_array+LABAO_REOPEN_TIPTILT));
+        gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
+        gtk_container_set_border_width (GTK_CONTAINER(button),1);
+        gtk_widget_set_usize(button, LABAO_WIDTH/5, LABAO_HEIGHT);
+        gtk_widget_show(button);
+
+        button = gtk_button_new_with_label ("TT ON");
+        gtk_signal_connect (GTK_OBJECT (button), "clicked",
+		GTK_SIGNAL_FUNC (labao_message_callback),
+                (gpointer)(message_array+LABAO_TIPTILT_ON));
+        gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
+        gtk_container_set_border_width (GTK_CONTAINER(button),1);
+        gtk_widget_set_usize(button, LABAO_WIDTH/5, LABAO_HEIGHT);
+        gtk_widget_show(button);
+
+        button = gtk_button_new_with_label ("TT OFF");
+        gtk_signal_connect (GTK_OBJECT (button), "clicked",
+		GTK_SIGNAL_FUNC (labao_message_callback),
+                (gpointer)(message_array+LABAO_TIPTILT_OFF));
+        gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
+        gtk_container_set_border_width (GTK_CONTAINER(button),1);
+        gtk_widget_set_usize(button, LABAO_WIDTH/5, LABAO_HEIGHT);
+        gtk_widget_show(button);
+
 	fsm_state_label = gtk_label_new("");
-        gtk_box_pack_start(GTK_BOX(vbox), fsm_state_label , TRUE, TRUE, 0);
-        gtk_widget_set_usize (fsm_state_label, LABAO_WIDTH, LABAO_HEIGHT);
+        gtk_box_pack_start(GTK_BOX(hbox), fsm_state_label , TRUE, TRUE, 0);
+        gtk_widget_set_usize (fsm_state_label, 2.2*LABAO_WIDTH/5, LABAO_HEIGHT);
         gtk_widget_show(fsm_state_label);
 
 	update_wfs_results();

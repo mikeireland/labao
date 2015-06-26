@@ -90,8 +90,8 @@ extern int fsm_state;
 
 /* These centroid offsets in principle need a mutex. In practice, all OK. */
 
-extern float x_centroid_offsets[NUM_LENSLETS];
-extern float y_centroid_offsets[NUM_LENSLETS];
+extern float *x_centroid_offsets;
+extern float *y_centroid_offsets;
 
 /* These globals are strictly read-only from the main thread. */
 
@@ -125,6 +125,10 @@ extern float servo_damping_delta;
 /* So we know where the telescope is */
 
 extern struct s_scope_status telescope_status;
+
+/* For tiptilt contol */
+
+extern bool send_tiptilt;
 
 /* labao.c */
 
@@ -170,6 +174,9 @@ int message_labao_zero_wfs_aberration(struct smessage *message);
 int message_labao_set_fps(struct smessage *message);
 int message_labao_load_defaults(struct smessage *message);
 int message_labao_save_defaults(struct smessage *message);
+int message_labao_reopen_tiptilt(struct smessage *message);
+int message_labao_tiptilt_on(struct smessage *message);
+int message_labao_tiptilt_off(struct smessage *message);
 void send_labao_text_message(char *fmt, ...);
 
 /* labao_edac40.c */
@@ -303,11 +310,20 @@ int call_zero_aberrations(int argc, char **argv);
 int add_wfs_aberration(int zernike, float amplitude);
 int call_add_wfs_aberration(int argc, char **argv);
 int toggle_use_reference(int argc, char **argv);
-int set_reference_now(int argc, char **argv);
+void use_reference_on(void);
+void use_reference_off(void);
 int toggle_use_servo_flat(int argc, char **argv);
 int start_scope_dichroic_mapping(int argc, char **argv);
 int select_dichroic(int argc, char **argv);
 int message_aob_change_dichroic(struct smessage *message);
 
+/* labao_tiptilt_data_socket.c */
+
+int send_tiptilt_on(int argc, char **argv);
+int send_tiptilt_off(int argc, char **argv);
+int call_open_labao_tiptilt_data_socket(int argc, char **argv);
+int open_labao_tiptilt_data_socket(char *wfs_name);
+int close_labao_tiptilt_data_socket(void);
+int send_labao_tiptilt_data(float Az, float El);
 
 #endif

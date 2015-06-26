@@ -115,6 +115,9 @@ void setup_standard_labao_messages(void)
 		message_labao_zero_wfs_aberration);
         ui_add_message_job(LABAO_SET_FPS, message_labao_set_fps);
         ui_add_message_job(HUT_AOB_CHANGE_DICHROIC,message_aob_change_dichroic);
+        ui_add_message_job(LABAO_REOPEN_TIPTILT, message_labao_reopen_tiptilt);
+        ui_add_message_job(LABAO_TIPTILT_ON, message_labao_tiptilt_on);
+        ui_add_message_job(LABAO_TIPTILT_OFF, message_labao_tiptilt_off);
 
 } /* setup_standard_labao_messages() */
 
@@ -656,3 +659,51 @@ int message_labao_save_defaults(struct smessage *message)
 	return call_save_defaults(2, args);
 
 } /* message_labao_save_defaults() */
+
+/************************************************************************/
+/* message_labao_reopen_tiptilt()	                                */
+/*                                                                      */
+/************************************************************************/
+
+int message_labao_reopen_tiptilt(struct smessage *message)
+{
+	char	*args[2];
+
+	if (message->length != 0) 
+		return error(ERROR,"LABAO_REOPEN_TIPTILT with wrong data");
+
+	return call_open_labao_tiptilt_data_socket(0, NULL);
+
+} /* message_labao_reopen_tiptilt() */
+
+/************************************************************************/
+/* message_labao_tiptilt_on()		                                */
+/*                                                                      */
+/************************************************************************/
+
+int message_labao_tiptilt_on(struct smessage *message)
+{
+	char	*args[2];
+
+	if (message->length != 0) 
+		return error(ERROR,"LABAO_TIPTILT_ON with wrong data");
+
+	return send_tiptilt_on(0, NULL);
+
+} /* message_labao_tiptilt_on() */
+
+/************************************************************************/
+/* message_labao_tiptilt_off()		                                */
+/*                                                                      */
+/************************************************************************/
+
+int message_labao_tiptilt_off(struct smessage *message)
+{
+	char	*args[2];
+
+	if (message->length != 0) 
+		return error(ERROR,"LABAO_TIPTILT_OFF with wrong data");
+
+	return send_tiptilt_off(0, NULL);
+
+} /* message_labao_tiptilt_off() */
