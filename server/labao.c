@@ -407,6 +407,7 @@ int open_telescope_connection(int argc, char **argv)
         }
 
 	message(system_window, "Opened connection to Telescope Server.");
+	send_labao_text_message("Opened connection to Telescope Server.");
 
 	return NOERROR;
 

@@ -33,9 +33,15 @@
 #include <chara.h>
 #include <slalib.h>
 
+static GtkWidget *move_entry;
 static GtkWidget *tries_entry;
 static GtkWidget *num_entry;
 static GtkWidget *fps_entry;
+
+static int boxes_up = 0;
+static int boxes_down = 1;
+static int boxes_left = 2;
+static int boxes_right = 3;
 
 /************************************************************************/
 /* fill_wfs_page()							*/
@@ -65,7 +71,7 @@ void fill_wfs_page(GtkWidget *vbox)
                 (gpointer)(message_array+LABAO_START_USB_CAMERA));
         gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
         gtk_container_set_border_width (GTK_CONTAINER(button),1);
-        gtk_widget_set_usize (button, LABAO_WIDTH/4, LABAO_HEIGHT);
+        gtk_widget_set_usize (button, LABAO_WIDTH/5, LABAO_HEIGHT);
         gtk_widget_show(button);
 
         button = gtk_button_new_with_label ("STOP WFS");
@@ -74,25 +80,34 @@ void fill_wfs_page(GtkWidget *vbox)
                 (gpointer)(message_array+LABAO_STOP_USB_CAMERA));
         gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
         gtk_container_set_border_width (GTK_CONTAINER(button),1);
-        gtk_widget_set_usize (button, LABAO_WIDTH/4, LABAO_HEIGHT);
+        gtk_widget_set_usize (button, LABAO_WIDTH/5, LABAO_HEIGHT);
         gtk_widget_show(button);
 
-        button = gtk_button_new_with_label ("START DISPLAY");
+        button = gtk_button_new_with_label ("START DISP");
 	gtk_signal_connect (GTK_OBJECT (button), "clicked",
                 GTK_SIGNAL_FUNC (labao_message_callback),
                 (gpointer)(message_array+LABAO_START_USB_CAMERA_DISPLAY));
         gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
         gtk_container_set_border_width (GTK_CONTAINER(button),1);
-        gtk_widget_set_usize (button, LABAO_WIDTH/4, LABAO_HEIGHT);
+        gtk_widget_set_usize (button, LABAO_WIDTH/5, LABAO_HEIGHT);
         gtk_widget_show(button);
 
-        button = gtk_button_new_with_label ("STOP DISPLAY");
+        button = gtk_button_new_with_label ("STOP DISP");
 	gtk_signal_connect (GTK_OBJECT (button), "clicked",
                 GTK_SIGNAL_FUNC (labao_message_callback),
                 (gpointer)(message_array+LABAO_STOP_USB_CAMERA_DISPLAY));
         gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
         gtk_container_set_border_width (GTK_CONTAINER(button),1);
-        gtk_widget_set_usize (button, LABAO_WIDTH/4, LABAO_HEIGHT);
+        gtk_widget_set_usize (button, LABAO_WIDTH/5, LABAO_HEIGHT);
+        gtk_widget_show(button);
+
+        button = gtk_button_new_with_label ("BOXES ON/OFF");
+	gtk_signal_connect (GTK_OBJECT (button), "clicked",
+                GTK_SIGNAL_FUNC (labao_message_callback),
+                (gpointer)(message_array+LABAO_TOGGLE_OVERLAY_BOXES));
+        gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
+        gtk_container_set_border_width (GTK_CONTAINER(button),1);
+        gtk_widget_set_usize (button, LABAO_WIDTH/5, LABAO_HEIGHT);
         gtk_widget_show(button);
 
 	/* Second row of Buttons */
@@ -101,22 +116,13 @@ void fill_wfs_page(GtkWidget *vbox)
 	gtk_container_add (GTK_CONTAINER (vbox), hbox);
 	gtk_widget_show(hbox);
 
-        button = gtk_button_new_with_label ("OVERLAY BOXES");
-	gtk_signal_connect (GTK_OBJECT (button), "clicked",
-                GTK_SIGNAL_FUNC (labao_message_callback),
-                (gpointer)(message_array+LABAO_TOGGLE_OVERLAY_BOXES));
-        gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
-        gtk_container_set_border_width (GTK_CONTAINER(button),1);
-        gtk_widget_set_usize (button, LABAO_WIDTH/4, LABAO_HEIGHT);
-        gtk_widget_show(button);
-
         button = gtk_button_new_with_label ("DESTRIPE");
 	gtk_signal_connect (GTK_OBJECT (button), "clicked",
                 GTK_SIGNAL_FUNC (labao_message_callback),
                 (gpointer)(message_array+LABAO_TOGGLE_DESTRIPE));
         gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
         gtk_container_set_border_width (GTK_CONTAINER(button),1);
-        gtk_widget_set_usize (button, LABAO_WIDTH/4, LABAO_HEIGHT);
+        gtk_widget_set_usize (button, LABAO_WIDTH/5, LABAO_HEIGHT);
         gtk_widget_show(button);
 
         button = gtk_button_new_with_label ("MAKE DARK");
@@ -125,7 +131,7 @@ void fill_wfs_page(GtkWidget *vbox)
                 (gpointer)(message_array+LABAO_CREATE_DARK));
         gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
         gtk_container_set_border_width (GTK_CONTAINER(button),1);
-        gtk_widget_set_usize (button, LABAO_WIDTH/4, LABAO_HEIGHT);
+        gtk_widget_set_usize (button, LABAO_WIDTH/5, LABAO_HEIGHT);
         gtk_widget_show(button);
 
         button = gtk_button_new_with_label ("ZERO DARK");
@@ -134,14 +140,8 @@ void fill_wfs_page(GtkWidget *vbox)
                 (gpointer)(message_array+LABAO_ZERO_DARK));
         gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
         gtk_container_set_border_width (GTK_CONTAINER(button),1);
-        gtk_widget_set_usize (button, LABAO_WIDTH/4, LABAO_HEIGHT);
+        gtk_widget_set_usize (button, LABAO_WIDTH/5, LABAO_HEIGHT);
         gtk_widget_show(button);
-
-	/* Third row of Buttons */
-
-	hbox = gtk_hbox_new(FALSE, 0);
-	gtk_container_add (GTK_CONTAINER (vbox), hbox);
-	gtk_widget_show(hbox);
 
         button = gtk_button_new_with_label ("CLOSE SERVO");
 	gtk_signal_connect (GTK_OBJECT (button), "clicked",
@@ -149,7 +149,7 @@ void fill_wfs_page(GtkWidget *vbox)
                 (gpointer)(message_array+LABAO_CLOSE_SERVO));
         gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
         gtk_container_set_border_width (GTK_CONTAINER(button),1);
-        gtk_widget_set_usize (button, LABAO_WIDTH/4, LABAO_HEIGHT);
+        gtk_widget_set_usize (button, LABAO_WIDTH/5, LABAO_HEIGHT);
         gtk_widget_show(button);
 
         button = gtk_button_new_with_label ("OPEN SERVO");
@@ -158,39 +158,10 @@ void fill_wfs_page(GtkWidget *vbox)
                 (gpointer)(message_array+LABAO_OPEN_SERVO));
         gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
         gtk_container_set_border_width (GTK_CONTAINER(button),1);
-        gtk_widget_set_usize (button, LABAO_WIDTH/4, LABAO_HEIGHT);
+        gtk_widget_set_usize (button, LABAO_WIDTH/5, LABAO_HEIGHT);
         gtk_widget_show(button);
 
-        button = gtk_button_new_with_label ("LOAD DEF");
-	gtk_signal_connect (GTK_OBJECT (button), "clicked",
-                GTK_SIGNAL_FUNC (labao_message_callback),
-                (gpointer)(message_array+LABAO_LOAD_DEFAULTS));
-        gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
-        gtk_container_set_border_width (GTK_CONTAINER(button),1);
-	gtk_widget_set_usize (button, LABAO_WIDTH/4, LABAO_HEIGHT);
-        gtk_widget_show(button);
-
-	if (engineering_mode)
-	{
-		button = gtk_button_new_with_label ("SAVE DEF");
-		gtk_signal_connect (GTK_OBJECT (button), "clicked",
-			GTK_SIGNAL_FUNC (labao_message_callback),
-			(gpointer)(message_array+LABAO_SAVE_DEFAULTS));
-		gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
-		gtk_container_set_border_width (GTK_CONTAINER(button),1);
-		gtk_widget_set_usize (button, LABAO_WIDTH/4, LABAO_HEIGHT);
-		gtk_widget_show(button);
-	}
-	else
-	{
-		button = gtk_button_new_with_label ("");
-		gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
-		gtk_container_set_border_width (GTK_CONTAINER(button),1);
-		gtk_widget_set_usize (button, LABAO_WIDTH/4, LABAO_HEIGHT);
-		gtk_widget_show(button);
-	}
-
-	/* Fifth row of Buttons */
+	/* Third row of Buttons */
 
 	hbox = gtk_hbox_new(FALSE, 0);
 	gtk_container_add (GTK_CONTAINER (vbox), hbox);
@@ -202,7 +173,7 @@ void fill_wfs_page(GtkWidget *vbox)
                 (gpointer)(message_array+LABAO_FLATTEN_WAVEFRONT));
         gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
         gtk_container_set_border_width (GTK_CONTAINER(button),1);
-        gtk_widget_set_usize (button, LABAO_WIDTH/4, LABAO_HEIGHT);
+        gtk_widget_set_usize (button, LABAO_WIDTH/5, LABAO_HEIGHT);
         gtk_widget_show(button);
 
         button = gtk_button_new_with_label ("SET FLAT");
@@ -211,7 +182,7 @@ void fill_wfs_page(GtkWidget *vbox)
                 (gpointer)(message_array+LABAO_SET_FLAT_DM));
         gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
         gtk_container_set_border_width (GTK_CONTAINER(button),1);
-        gtk_widget_set_usize (button, LABAO_WIDTH/4, LABAO_HEIGHT);
+        gtk_widget_set_usize (button, LABAO_WIDTH/5, LABAO_HEIGHT);
         gtk_widget_show(button);
 
         button = gtk_button_new_with_label ("IGNORE TILT");
@@ -220,8 +191,33 @@ void fill_wfs_page(GtkWidget *vbox)
                 (gpointer)(message_array+LABAO_TOGGLE_IGNORE_TILT));
         gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
         gtk_container_set_border_width (GTK_CONTAINER(button),1);
-        gtk_widget_set_usize (button, LABAO_WIDTH/4, LABAO_HEIGHT);
+        gtk_widget_set_usize (button, LABAO_WIDTH/5, LABAO_HEIGHT);
         gtk_widget_show(button);
+
+	button = gtk_button_new_with_label ("TOGGLE REF");
+	gtk_signal_connect (GTK_OBJECT (button), "clicked",
+		GTK_SIGNAL_FUNC (labao_message_callback),
+		(gpointer)(message_array+LABAO_TOGGLE_REFERENCE));
+	gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
+	gtk_container_set_border_width (GTK_CONTAINER(button),1);
+	gtk_widget_set_usize (button, LABAO_WIDTH/5, LABAO_HEIGHT);
+	gtk_widget_show(button);
+
+        button = gtk_button_new_with_label ("LOAD DEF");
+	gtk_signal_connect (GTK_OBJECT (button), "clicked",
+                GTK_SIGNAL_FUNC (labao_message_callback),
+                (gpointer)(message_array+LABAO_LOAD_DEFAULTS));
+        gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
+        gtk_container_set_border_width (GTK_CONTAINER(button),1);
+	gtk_widget_set_usize (button, LABAO_WIDTH/5, LABAO_HEIGHT);
+        gtk_widget_show(button);
+
+
+	/* Fourth row of Buttons */
+
+	hbox = gtk_hbox_new(FALSE, 0);
+	gtk_container_add (GTK_CONTAINER (vbox), hbox);
+	gtk_widget_show(hbox);
 
 	if (engineering_mode)
 	{
@@ -231,25 +227,8 @@ void fill_wfs_page(GtkWidget *vbox)
 			(gpointer)(message_array+LABAO_LOAD_RECONSTRUCTOR));
 		gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
 		gtk_container_set_border_width (GTK_CONTAINER(button),1);
-		gtk_widget_set_usize (button, LABAO_WIDTH/4, LABAO_HEIGHT);
+		gtk_widget_set_usize (button, LABAO_WIDTH/5, LABAO_HEIGHT);
 		gtk_widget_show(button);
-	}
-	else
-	{
-		button = gtk_button_new_with_label ("");
-		gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
-		gtk_container_set_border_width (GTK_CONTAINER(button),1);
-		gtk_widget_set_usize (button, LABAO_WIDTH/4, LABAO_HEIGHT);
-		gtk_widget_show(button);
-	}
-
-	if (engineering_mode)
-	{
-		/* sixth row of Buttons */
-
-		hbox = gtk_hbox_new(FALSE, 0);
-		gtk_container_add (GTK_CONTAINER (vbox), hbox);
-		gtk_widget_show(hbox);
 
 		button = gtk_button_new_with_label ("APPLY RECON");
 		gtk_signal_connect (GTK_OBJECT (button), "clicked",
@@ -257,7 +236,7 @@ void fill_wfs_page(GtkWidget *vbox)
 			(gpointer)(message_array+LABAO_APPLY_RECONSTRUCTOR));
 		gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
 		gtk_container_set_border_width (GTK_CONTAINER(button),1);
-		gtk_widget_set_usize (button, LABAO_WIDTH/4, LABAO_HEIGHT);
+		gtk_widget_set_usize (button, LABAO_WIDTH/5, LABAO_HEIGHT);
 		gtk_widget_show(button);
 
 		button = gtk_button_new_with_label ("MEASURE RECON");
@@ -266,7 +245,7 @@ void fill_wfs_page(GtkWidget *vbox)
 			(gpointer)(message_array+LABAO_MEASURE_RECONSTRUCTOR));
 		gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
 		gtk_container_set_border_width (GTK_CONTAINER(button),1);
-		gtk_widget_set_usize (button, LABAO_WIDTH/4, LABAO_HEIGHT);
+		gtk_widget_set_usize (button, LABAO_WIDTH/5, LABAO_HEIGHT);
 		gtk_widget_show(button);
 
 		button = gtk_button_new_with_label ("COMPUTE RECON");
@@ -275,7 +254,7 @@ void fill_wfs_page(GtkWidget *vbox)
 			(gpointer)(message_array+LABAO_COMPUTE_RECONSTRUCTOR));
 		gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
 		gtk_container_set_border_width (GTK_CONTAINER(button),1);
-		gtk_widget_set_usize (button, LABAO_WIDTH/4, LABAO_HEIGHT);
+		gtk_widget_set_usize (button, LABAO_WIDTH/5, LABAO_HEIGHT);
 		gtk_widget_show(button);
 
 		button = gtk_button_new_with_label ("SAVE RECON");
@@ -284,22 +263,22 @@ void fill_wfs_page(GtkWidget *vbox)
 			(gpointer)(message_array+LABAO_SAVE_RECONSTRUCTOR));
 		gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
 		gtk_container_set_border_width (GTK_CONTAINER(button),1);
-		gtk_widget_set_usize (button, LABAO_WIDTH/4, LABAO_HEIGHT);
+		gtk_widget_set_usize (button, LABAO_WIDTH/5, LABAO_HEIGHT);
 		gtk_widget_show(button);
 
-		/* Sixth row of Buttons */
+		/* Fifth row of Buttons */
 
 		hbox = gtk_hbox_new(FALSE, 0);
 		gtk_container_add (GTK_CONTAINER (vbox), hbox);
 		gtk_widget_show(hbox);
 
-		button = gtk_button_new_with_label ("DUMP CENTROID OFFSET");
+		button = gtk_button_new_with_label ("DUMP CENT OFFSET");
 		gtk_signal_connect (GTK_OBJECT (button), "clicked",
 			GTK_SIGNAL_FUNC (labao_message_callback),
 			(gpointer)(message_array+LABAO_DUMP_CENTROID_OFFSETS));
 		gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
 		gtk_container_set_border_width (GTK_CONTAINER(button),1);
-		gtk_widget_set_usize (button, LABAO_WIDTH/4, LABAO_HEIGHT);
+		gtk_widget_set_usize (button, LABAO_WIDTH/5, LABAO_HEIGHT);
 		gtk_widget_show(button);
 
 		button = gtk_button_new_with_label ("DUMP DM OFFSET");
@@ -308,38 +287,88 @@ void fill_wfs_page(GtkWidget *vbox)
 			(gpointer)(message_array+LABAO_DUMP_DM_OFFSET));
 		gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
 		gtk_container_set_border_width (GTK_CONTAINER(button),1);
-		gtk_widget_set_usize (button, LABAO_WIDTH/4, LABAO_HEIGHT);
+		gtk_widget_set_usize (button, LABAO_WIDTH/5, LABAO_HEIGHT);
 		gtk_widget_show(button);
 
-		button = gtk_button_new_with_label ("ZERO CENTROIDS");
+		button = gtk_button_new_with_label ("ZERO CENT");
 		gtk_signal_connect (GTK_OBJECT (button), "clicked",
 			GTK_SIGNAL_FUNC (labao_message_callback),
 			(gpointer)(message_array+LABAO_ZERO_CENTROIDS));
 		gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
 		gtk_container_set_border_width (GTK_CONTAINER(button),1);
-		gtk_widget_set_usize (button, LABAO_WIDTH/4, LABAO_HEIGHT);
+		gtk_widget_set_usize (button, LABAO_WIDTH/5, LABAO_HEIGHT);
 		gtk_widget_show(button);
 
-		button = gtk_button_new_with_label ("ACTUATOR TO SENSOR");
+		button = gtk_button_new_with_label ("ACT TO SENSOR");
 		gtk_signal_connect (GTK_OBJECT (button), "clicked",
 			GTK_SIGNAL_FUNC (labao_message_callback),
 		    (gpointer)(message_array+LABAO_SAVE_ACTUATOR_TO_SENSOR));
 		gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
 		gtk_container_set_border_width (GTK_CONTAINER(button),1);
-		gtk_widget_set_usize (button, LABAO_WIDTH/4, LABAO_HEIGHT);
+		gtk_widget_set_usize (button, LABAO_WIDTH/5, LABAO_HEIGHT);
 		gtk_widget_show(button);
-	}
-	else
-	{
-		label = gtk_label_new("");
-		gtk_box_pack_start(GTK_BOX(vbox), label , TRUE, TRUE, 0);
-		gtk_widget_set_usize (label, LABAO_WIDTH, LABAO_HEIGHT);
+
+		button = gtk_button_new_with_label ("SAVE DEF");
+		gtk_signal_connect (GTK_OBJECT (button), "clicked",
+			GTK_SIGNAL_FUNC (labao_message_callback),
+			(gpointer)(message_array+LABAO_SAVE_DEFAULTS));
+		gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
+		gtk_container_set_border_width (GTK_CONTAINER(button),1);
+		gtk_widget_set_usize (button, LABAO_WIDTH/5, LABAO_HEIGHT);
+		gtk_widget_show(button);
+
+		/* Sixth row of Buttons */
+
+		hbox = gtk_hbox_new(FALSE, 0);
+		gtk_container_add (GTK_CONTAINER (vbox), hbox);
+		gtk_widget_show(hbox);
+
+		label = gtk_label_new("MOVE:");
+		gtk_box_pack_start(GTK_BOX(hbox), label , TRUE, TRUE, 0);
+		gtk_widget_set_usize (label, LABAO_WIDTH/15, LABAO_HEIGHT);
 		gtk_widget_show(label);
 
-		label = gtk_label_new("");
-		gtk_box_pack_start(GTK_BOX(vbox), label , TRUE, TRUE, 0);
-		gtk_widget_set_usize (label, LABAO_WIDTH, LABAO_HEIGHT);
-		gtk_widget_show(label);
+		move_entry = gtk_entry_new ();
+		gtk_entry_set_text (GTK_ENTRY (move_entry),"0.1");
+		gtk_box_pack_start(GTK_BOX(hbox), move_entry, TRUE, TRUE, 0);
+		gtk_widget_set_usize (move_entry, LABAO_WIDTH/10, LABAO_HEIGHT);
+		gtk_widget_show(move_entry);
+
+		button = gtk_button_new_with_label ("UP");
+		gtk_signal_connect (GTK_OBJECT (button), "clicked",
+			GTK_SIGNAL_FUNC (labao_move_callback),
+			(gpointer)(&boxes_up));
+		gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
+		gtk_container_set_border_width (GTK_CONTAINER(button),1);
+		gtk_widget_set_usize (button, LABAO_WIDTH/5, LABAO_HEIGHT);
+		gtk_widget_show(button);
+
+		button = gtk_button_new_with_label ("DOWN");
+		gtk_signal_connect (GTK_OBJECT (button), "clicked",
+			GTK_SIGNAL_FUNC (labao_move_callback),
+			(gpointer)(&boxes_down));
+		gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
+		gtk_container_set_border_width (GTK_CONTAINER(button),1);
+		gtk_widget_set_usize (button, LABAO_WIDTH/5, LABAO_HEIGHT);
+		gtk_widget_show(button);
+
+		button = gtk_button_new_with_label ("LEFT");
+			gtk_signal_connect (GTK_OBJECT (button), "clicked",
+			GTK_SIGNAL_FUNC (labao_move_callback),
+			(gpointer)(&boxes_left));
+		gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
+		gtk_container_set_border_width (GTK_CONTAINER(button),1);
+		gtk_widget_set_usize (button, LABAO_WIDTH/5, LABAO_HEIGHT);
+		gtk_widget_show(button);
+
+		button = gtk_button_new_with_label ("RIGHT");
+		gtk_signal_connect (GTK_OBJECT (button), "clicked",
+			GTK_SIGNAL_FUNC (labao_move_callback),
+			(gpointer)(&boxes_right));
+		gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
+		gtk_container_set_border_width (GTK_CONTAINER(button),1);
+		gtk_widget_set_usize (button, LABAO_WIDTH/5, LABAO_HEIGHT);
+		gtk_widget_show(button);
 	}
 
 	/* Seventh row of Buttons */
@@ -400,7 +429,7 @@ void fill_wfs_page(GtkWidget *vbox)
         gtk_widget_set_usize (fps_entry, LABAO_WIDTH/10, LABAO_HEIGHT);
         gtk_widget_show(fps_entry);
 
-	/* Seventh row of Buttons */
+	/* Eigth row of Buttons */
 
 	hbox = gtk_hbox_new(FALSE, 0);
 	gtk_container_add (GTK_CONTAINER (vbox), hbox);
@@ -639,3 +668,54 @@ void labao_save_data_callback(GtkButton *button, gpointer data)
         }
 
 } /* labao_save_data_callback() */
+
+/************************************************************************/
+/* labao_move_callback()						*/
+/*									*/
+/************************************************************************/
+
+void labao_move_callback(GtkButton *button, gpointer data)
+{
+        struct smessage mess;
+	struct s_labao_move_boxes move_data;
+        char    *entry;
+	float	move;
+	int	dir;
+
+        entry = (char *)gtk_entry_get_text(GTK_ENTRY(move_entry));
+        sscanf(entry,"%f", &move);
+	dir = *((int *) data);
+
+	switch(dir)
+	{
+		case 0: move_data.dx = 0.0;
+			       	move_data.dy = move;
+				break;
+
+		case 1: move_data.dx = 0.0;
+			       	move_data.dy = -1.0 * move;
+				break;
+
+		case 2: move_data.dx = -1.0 * move;
+			       	move_data.dy = 0.0;
+				break;
+
+		case 3: move_data.dx = move;
+			       	move_data.dy = 0.0;
+				break;
+
+		default: print_status(ERROR,"Unknown move for Boxes.");
+				return;
+	}
+
+        mess.type = LABAO_MOVE_BOXES;
+        mess.length = sizeof(move_data);
+        mess.data = (unsigned char *)&move_data;
+
+        if (!send_message(server, &mess))
+        {
+          print_status(ERROR,
+		"Failed to send LABAO_MOVE_BOXES message.\n");
+        }
+
+} /* labao_move_callback() */

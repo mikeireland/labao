@@ -349,6 +349,15 @@ int main(int  argc, char *argv[] )
 
         /* Add tiptilt control buttons */
 
+        button = gtk_button_new_with_label ("REOPEN SCOPE");
+        gtk_signal_connect (GTK_OBJECT (button), "clicked",
+		GTK_SIGNAL_FUNC (labao_message_callback),
+                (gpointer)(message_array+LABAO_REOPEN_TELESCOPE));
+        gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
+        gtk_container_set_border_width (GTK_CONTAINER(button),1);
+        gtk_widget_set_usize(button, LABAO_WIDTH/5, LABAO_HEIGHT);
+        gtk_widget_show(button);
+
         button = gtk_button_new_with_label ("REOPEN TT");
         gtk_signal_connect (GTK_OBJECT (button), "clicked",
 		GTK_SIGNAL_FUNC (labao_message_callback),
@@ -364,7 +373,7 @@ int main(int  argc, char *argv[] )
                 (gpointer)(message_array+LABAO_TIPTILT_ON));
         gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
         gtk_container_set_border_width (GTK_CONTAINER(button),1);
-        gtk_widget_set_usize(button, LABAO_WIDTH/5, LABAO_HEIGHT);
+        gtk_widget_set_usize(button, LABAO_WIDTH/10, LABAO_HEIGHT);
         gtk_widget_show(button);
 
         button = gtk_button_new_with_label ("TT OFF");
@@ -373,12 +382,13 @@ int main(int  argc, char *argv[] )
                 (gpointer)(message_array+LABAO_TIPTILT_OFF));
         gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
         gtk_container_set_border_width (GTK_CONTAINER(button),1);
-        gtk_widget_set_usize(button, LABAO_WIDTH/5, LABAO_HEIGHT);
+        gtk_widget_set_usize(button, LABAO_WIDTH/10, LABAO_HEIGHT);
         gtk_widget_show(button);
 
 	fsm_state_label = gtk_label_new("");
         gtk_box_pack_start(GTK_BOX(hbox), fsm_state_label , TRUE, TRUE, 0);
-        gtk_widget_set_usize (fsm_state_label, 2.2*LABAO_WIDTH/5, LABAO_HEIGHT);
+        gtk_widget_set_usize (fsm_state_label,
+		1.11*LABAO_WIDTH/2.5,LABAO_HEIGHT);
         gtk_widget_show(fsm_state_label);
 
 	update_wfs_results();
@@ -948,18 +958,23 @@ void update_wfs_results(void)
 	sprintf(s,"C1: %+5.2f", wfs_results.c1);
 	gtk_label_set_text((GtkLabel *) c2_label, s);
 
+	if (wfs_results.use_reference)
+		strcpy(s,"Laser - ");
+	else
+		strcpy(s,"Beacon - ");
+
 	switch(wfs_results.current_dichroic)
 	{
-		case AOB_DICHROIC_GRAY: strcpy(s, "Dichroic GRAY - ");
+		case AOB_DICHROIC_GRAY: strcat(s, "Dichroic GRAY - ");
 					break;
 
-		case AOB_DICHROIC_SPARE: strcpy(s, "Dichroic SPARE - ");
+		case AOB_DICHROIC_SPARE: strcat(s, "Dichroic SPARE - ");
 					break;
 
-		case AOB_DICHROIC_YSO: strcpy(s, "Dichroic YSO - ");
+		case AOB_DICHROIC_YSO: strcat(s, "Dichroic YSO - ");
 					break;
 
-		default: strcpy(s, "Dichroic UNKNOWN - ");
+		default: strcat(s, "Dichroic UNKNOWN - ");
 					break;
 	}
 

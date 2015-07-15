@@ -118,6 +118,10 @@ void setup_standard_labao_messages(void)
         ui_add_message_job(LABAO_REOPEN_TIPTILT, message_labao_reopen_tiptilt);
         ui_add_message_job(LABAO_TIPTILT_ON, message_labao_tiptilt_on);
         ui_add_message_job(LABAO_TIPTILT_OFF, message_labao_tiptilt_off);
+	ui_add_message_job(LABAO_TOGGLE_REFERENCE, 
+                message_labao_toggle_reference);
+	ui_add_message_job(LABAO_MOVE_BOXES, message_labao_move_boxes);
+
 
 } /* setup_standard_labao_messages() */
 
@@ -683,8 +687,6 @@ int message_labao_reopen_tiptilt(struct smessage *message)
 
 int message_labao_tiptilt_on(struct smessage *message)
 {
-	char	*args[2];
-
 	if (message->length != 0) 
 		return error(ERROR,"LABAO_TIPTILT_ON with wrong data");
 
@@ -699,11 +701,53 @@ int message_labao_tiptilt_on(struct smessage *message)
 
 int message_labao_tiptilt_off(struct smessage *message)
 {
-	char	*args[2];
-
 	if (message->length != 0) 
 		return error(ERROR,"LABAO_TIPTILT_OFF with wrong data");
 
 	return send_tiptilt_off(0, NULL);
 
 } /* message_labao_tiptilt_off() */
+
+/************************************************************************/
+/* message_labao_toggle_reference()                                     */
+/*                                                                      */
+/************************************************************************/
+
+int message_labao_toggle_reference(struct smessage *message)
+{
+        if (message->length != 0) 
+                return error(ERROR,"Wrong data for LABAO_TOGGLE_REFERENCE");
+
+        return toggle_use_reference(0, NULL);
+
+} /* message_labao_toggle_reference() */
+
+/************************************************************************/
+/* message_labao_move_boxes()                                  */
+/*                                                                      */
+/************************************************************************/
+
+int message_labao_move_boxes(struct smessage *message)
+{
+	char	*args[3];
+	char	argv1[30];
+	char	argv2[30];
+	struct  s_labao_move_boxes *data;
+
+	if (message->length != sizeof(struct s_labao_move_boxes))
+    		return error(ERROR,
+			"Got LABAO_MOVE_BOXES with wrong data.");
+
+	data = (struct s_labao_move_boxes *)message->data;
+
+	sprintf(argv1,"%.4f", data->dx);
+	sprintf(argv2,"%.4f", data->dy);
+
+	args[0] = "move";
+	args[1] = argv1;
+	args[2] = argv2;
+
+	return move_boxes(3, args);
+
+} /* message_labao_move_boxes() */
+

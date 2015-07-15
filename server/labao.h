@@ -177,6 +177,8 @@ int message_labao_save_defaults(struct smessage *message);
 int message_labao_reopen_tiptilt(struct smessage *message);
 int message_labao_tiptilt_on(struct smessage *message);
 int message_labao_tiptilt_off(struct smessage *message);
+int message_labao_toggle_reference(struct smessage *message);
+int message_labao_move_boxes(struct smessage *message);
 void send_labao_text_message(char *fmt, ...);
 
 /* labao_edac40.c */

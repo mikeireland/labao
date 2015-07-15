@@ -1312,6 +1312,8 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 								fsm_state;
 		aberrations_record[aberrations_record_count].current_dichroic = 
 							current_dichroic;
+		aberrations_record[aberrations_record_count].use_reference = 
+							use_reference;
 		aberrations_record[aberrations_record_count].time_stamp = 
 								time_stamp;
 
@@ -1341,6 +1343,7 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 		wfs_results.ypos = calc_labao_results.ypos/wfs_results_num;
 		wfs_results.fsm_state = fsm_state;
 		wfs_results.current_dichroic = current_dichroic;
+		wfs_results.use_reference = use_reference;
 
 		if (set_center)
 		{
