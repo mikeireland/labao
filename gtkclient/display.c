@@ -48,7 +48,6 @@ int message_labao_usb_image(int server, struct smessage *mess)
 	char *usb_image;
 	uLongf  len, clen;
 	int	i,j;
-	float	*pf1;
 	unsigned char *pu1, achar;
 	char	*pc1, *pc2;
 
