@@ -67,9 +67,10 @@ char    *pico_servers[NUM_PICO_SERVERS] = {"PICO_1", "PICO_2", "PICO_3",
 int     telescope_server = -1;
 int	dich_mirror = -1;
 struct SMIRROR_LIST mirror_list[MAX_SERVERS];
+float servo_memory = SERVO_MEMORY;
 float servo_gain = SERVO_GAIN;
 float servo_damping = SERVO_DAMPING;
-float servo_memory = SERVO_MEMORY;
+float servo_integration = SERVO_INTEGRATION;
 float    xpos_center = 0.0;
 float    ypos_center = 0.0;
 struct s_scope_status telescope_status;

@@ -72,9 +72,11 @@
 
 #define ARCSEC_PER_PIX 0.3
 
+#define SERVO_MEMORY 0.9
 #define SERVO_GAIN 0.5
 #define SERVO_DAMPING 0.0
-#define SERVO_MEMORY 0.9
+#define SERVO_INTEGRATION 0.0
+#define SERVO_SUM_MAX 0.01
 
 /*
  * Some globals
@@ -116,9 +118,10 @@ extern char	*pico_servers[NUM_PICO_SERVERS];
 extern int	telescope_server;
 extern int	dich_mirror;
 extern struct SMIRROR_LIST mirror_list[];
+extern float servo_memory;
 extern float servo_gain;
 extern float servo_damping;
-extern float servo_memory;
+extern float servo_integration;
 
 /* So we know where the telescope is */
 

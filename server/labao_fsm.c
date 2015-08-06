@@ -105,6 +105,8 @@ static float fsm_mean_dm[NUM_ACTUATORS];
 static float fsm_calc_mean_dm[NUM_ACTUATORS];
 static float fsm_dm_offset[NUM_ACTUATORS];
 static float fsm_dm_delta[NUM_ACTUATORS];
+static float fsm_dm_sum[NUM_ACTUATORS];
+static float max_dm_sum = SERVO_SUM_MAX;
 static float fsm_dm_last_delta[NUM_ACTUATORS];
 static pthread_mutex_t fsm_mutex = PTHREAD_MUTEX_INITIALIZER;
 static int actuator=1;
@@ -210,6 +212,7 @@ void initialize_fsm(void)
 		fsm_calc_mean_dm[i]=DM_DEFAULT;
 		fsm_dm_offset[i]=0.0;	
 		fsm_dm_delta[i]=0.0;	
+		fsm_dm_sum[i]=0.0;	
 		fsm_dm_last_delta[i]=0.0;	
 	}
 	fsm_flat_dm = fsm_flat_dm_spare;
@@ -822,6 +825,7 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 	float max;
 	float fluxes[NUM_LENSLETS];
 	float new_dm[NUM_ACTUATORS+1];
+	float fsm_dm_error[NUM_ACTUATORS];
 	int x,y,dx,dy;
 	bool is_new_actuator=TRUE;
 	float outer_dm_mean = 0.0;
@@ -1091,6 +1095,7 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 		    {
 			fsm_dm_offset[i] = 0.0;
 			fsm_dm_delta[i] = 0.0;
+			fsm_dm_sum[i] = 0.0;
 			fsm_dm_last_delta[i] = 0.0;
 		    }
 
@@ -1112,34 +1117,48 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 			ytilt /= NUM_LENSLETS;
 		    }
 
-		    /* Apply the reconstructor and get the delta for DM */
+		    /* Apply the reconstructor and get the delta for the DM */
 
 		    for (l=0;l<NUM_LENSLETS;l++)
 		    {
-			fsm_dm_delta[i] = -1.0 * 
-				fsm_reconstructor[i][l] *
-				(new_xc[l] - xtilt + aberration_xc[l]);
-			fsm_dm_delta[i] = -1.0 * 
+			fsm_dm_error[i] = -1.0 * 
+				(fsm_reconstructor[i][l] *
+				(new_xc[l] - xtilt + aberration_xc[l]) +
 				fsm_reconstructor[i][NUM_LENSLETS+l] *
-				(new_yc[l] - ytilt + aberration_yc[l]);
+				(new_yc[l] - ytilt + aberration_yc[l]));
 		    }
 
 		    /* 
  		     * The most likely wavefront is flat, 
- 		     * so damp the DM position to flat
+ 		     * so damp the DM position to flat.
+ 		     * If this memory is 1.0 this behaves like a standard
+ 		     * servo. If it is less than one things always relax
+ 		     * towards the "flat" DM.
  		     */
 
 		    if (fsm_state == FSM_SERVO_LOOP)
 			fsm_dm_offset[i] *= servo_memory;
 
-		    /* Now apply the servo to the new delta */
+		    /* Now apply the servo to the error */
 
-		    fsm_dm_offset[i] += (servo_gain * fsm_dm_delta[i] -
-			servo_damping * fsm_dm_last_delta[i]);
+		    fsm_dm_delta[i] = servo_gain * fsm_dm_error[i] -
+			servo_damping * fsm_dm_last_delta[i] +
+			servo_integration * fsm_dm_sum[i];
 
 		    /* We will need these for the next round */
 
 		    fsm_dm_last_delta[i] = fsm_dm_delta[i];
+		    fsm_dm_sum[i] += fsm_dm_error[i];
+    
+    		    if (fabs(fsm_dm_sum[i]) > max_dm_sum)
+		    {
+			fsm_dm_sum[i] = max_dm_sum * 
+					fsm_dm_sum[i]/fabs(fsm_dm_sum[i]);
+		    }
+
+		    /* We now have a final offset form the flat */
+
+		    fsm_dm_offset[i] += fsm_dm_delta[i];
 
 #ifdef ENFORCE_ZERO_PISTON
 		    if (i >= NUM_INNER_ACTUATORS)
