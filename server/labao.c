@@ -18,6 +18,9 @@
 /* 4.5 - Frame summing added						*/
 /* 5.0 - Different DM shapes for dichroics and different centroids	*/
 /*	 for reference and beacon.					*/
+/* 5.1 - More functionality added for tiptilt messages to WFS.          */
+/* 5.2 - Automated Coude/Dichroic corrections added                     */
+/* 6.0 - No changes but wanted to make the version clearly new.		*/
 /************************************************************************/
 /*                                                                      */
 /*                    CHARA ARRAY USER INTERFACE			*/
@@ -64,10 +67,9 @@ char    *pico_servers[NUM_PICO_SERVERS] = {"PICO_1", "PICO_2", "PICO_3",
 int     telescope_server = -1;
 int	dich_mirror = -1;
 struct SMIRROR_LIST mirror_list[MAX_SERVERS];
-float servo_gain_flat = SERVO_GAIN_FLAT;
-float servo_damping_flat = SERVO_DAMPING_FLAT;
-float servo_gain_delta = SERVO_GAIN_DELTA;
-float servo_damping_delta = SERVO_DAMPING_DELTA;
+float servo_gain = SERVO_GAIN;
+float servo_damping = SERVO_DAMPING;
+float servo_memory = SERVO_MEMORY;
 float    xpos_center = 0.0;
 float    ypos_center = 0.0;
 struct s_scope_status telescope_status;
@@ -150,7 +152,7 @@ int main(int argc, char **argv)
 	ui_clear_screen();
 	put_line("");
 
-	sprintf(title,"%s 5.0",labao_name);
+	sprintf(title,"%s 6.0",labao_name);
 	center_line(title);
 	put_line("");
 	center_line("The CHARA Array");
@@ -206,8 +208,6 @@ int main(int argc, char **argv)
 
 void labao_open(void) 
 {
-	struct smessage mess;
-
 	/* Setup the astromod with default values */
 
         astromod_init(NULL, NULL);

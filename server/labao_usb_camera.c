@@ -1313,9 +1313,10 @@ int stop_usb_camera_display(int argc, char **argv)
 /* -7 - Failed to set AOI.						*/
 /************************************************************************/
 
-int set_usb_camera_aoi(int x, int y, int width, int height)
+int set_usb_camera_aoi(bool move, int x, int y, int width, int height)
 {
 	IS_RECT 	newAOI;
+	int		dx, dy;
 
 	/* This seems unecessary now. */
 
@@ -1342,6 +1343,16 @@ int set_usb_camera_aoi(int x, int y, int width, int height)
 		return -8;
 	}
 	
+	/* Move the centroids if we need to - not the first time */
+
+        if (move&& (newAOI.s32X != rectAOI.s32X || newAOI.s32Y != rectAOI.s32Y))
+        {       
+                dx = rectAOI.s32X - newAOI.s32X;
+                dy = rectAOI.s32Y - newAOI.s32Y;
+                
+                move_centroids(dx, dy);
+        }       
+
 	rectAOI = newAOI;
 
 	return 0;
@@ -1436,7 +1447,7 @@ int call_set_usb_camera_aoi(int argc, char **argv)
 		sscanf(s,"%d",&height);
 	}
 
-	switch(set_usb_camera_aoi(x, y, width, height))
+	switch(set_usb_camera_aoi(TRUE, x, y, width, height))
 	{
 		case 0: return NOERROR;
 
@@ -1984,8 +1995,6 @@ void complete_fits_cube(void)
 	int     year, month, day, doy;
 	int	file_number = 0;
 	FILE	*output;
-	time_t	start;
-	time_t	last;
 	fitsfile *fptr;
 	int	fits_status;
 	long int naxis, naxes[3];

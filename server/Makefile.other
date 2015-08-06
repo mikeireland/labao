@@ -42,7 +42,7 @@ ETCDIR = /ctrscrut/chara/etc
 # The targets
 #
 
-all: 
+all: fit_dich_map
 
 #
 # The application target. This is to run in straight linux
@@ -62,12 +62,16 @@ OFILES = labao.o\
 #
 
 clean:
-	rm -f core *~ $(OFILES) labao zernike_test.dat
+	rm -f core *~ $(OFILES) labao zernike_test.dat fit_dich_map
 
 #
 # install
 #
 
-install: 
+install:  fit_dich_map
+	cp fit_dich_map $(BINDIR)/fit_dich_map
+	chmod a+rx $(BINDIR)/fit_dich_map
 
 uninstall:
+	rm -f $(BINDIR)/fit_dich_map
+

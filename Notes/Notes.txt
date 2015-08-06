@@ -188,3 +188,11 @@ We need to
 	_ Redo "FLAT" withour pavo dichroics and LDCs
 	_ Test position
 	_ Realign WFS.
+
+2015_07_14 THEO
+---------------
+
+Trying to use the 2-hole mask as a way of centering the beam. It doesn't seem
+to make any sense though as it's always between supb apertures. See image
+
+

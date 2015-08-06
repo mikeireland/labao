@@ -72,10 +72,9 @@
 
 #define ARCSEC_PER_PIX 0.3
 
-#define SERVO_DAMPING_FLAT 0.9
-#define SERVO_GAIN_FLAT 0.5
-#define SERVO_DAMPING_DELTA 0.0
-#define SERVO_GAIN_DELTA 0.0
+#define SERVO_GAIN 0.5
+#define SERVO_DAMPING 0.0
+#define SERVO_MEMORY 0.9
 
 /*
  * Some globals
@@ -117,10 +116,9 @@ extern char	*pico_servers[NUM_PICO_SERVERS];
 extern int	telescope_server;
 extern int	dich_mirror;
 extern struct SMIRROR_LIST mirror_list[];
-extern float servo_gain_flat;
-extern float servo_damping_flat;
-extern float servo_gain_delta;
-extern float servo_damping_delta;
+extern float servo_gain;
+extern float servo_damping;
+extern float servo_memory;
 
 /* So we know where the telescope is */
 
@@ -237,7 +235,7 @@ int stop_usb_camera(int argc, char **argv);
 int usb_camera_status(void);
 int start_usb_camera_display(int argc, char **argv);
 int stop_usb_camera_display(int argc, char **argv);
-int set_usb_camera_aoi(int x, int y, int width, int height);
+int set_usb_camera_aoi(bool move_centroids,int x, int y, int width, int height);
 void get_usb_camera_aoi(int *x, int *y, int *width, int *height);
 int call_set_usb_camera_aoi(int argc, char **argv);
 int set_optimal_camera_timing(int argc, char **argv);
@@ -303,6 +301,7 @@ int start_autoalign_zernike(int argc, char **argv);
 int stop_autoalign(int argc, char **argv);
 int edit_servo_parameters(int argc, char **argv);
 int move_boxes(int argc, char **argv);
+void move_centroids(float dx, float dy);
 int edit_zero_clamp(int argc, char **argv);
 int edit_denom_clamp(int argc, char **argv);
 int message_labao_save_aberrations(struct smessage *message);
@@ -314,10 +313,11 @@ int call_add_wfs_aberration(int argc, char **argv);
 int toggle_use_reference(int argc, char **argv);
 void use_reference_on(void);
 void use_reference_off(void);
-int toggle_use_servo_flat(int argc, char **argv);
 int start_scope_dichroic_mapping(int argc, char **argv);
 int select_dichroic(int argc, char **argv);
 int message_aob_change_dichroic(struct smessage *message);
+int toggle_coude_dichroic_corrections(int argc, char **argv);
+int edit_coude_dichroic_corrections(int argc, char **argv);
 
 /* labao_tiptilt_data_socket.c */
 

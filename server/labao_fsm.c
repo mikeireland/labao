@@ -104,7 +104,8 @@ static float fsm_flat_dm_spare[NUM_ACTUATORS];
 static float fsm_mean_dm[NUM_ACTUATORS];
 static float fsm_calc_mean_dm[NUM_ACTUATORS];
 static float fsm_dm_offset[NUM_ACTUATORS];
-static float last_delta_dm[NUM_ACTUATORS];
+static float fsm_dm_delta[NUM_ACTUATORS];
+static float fsm_dm_last_delta[NUM_ACTUATORS];
 static pthread_mutex_t fsm_mutex = PTHREAD_MUTEX_INITIALIZER;
 static int actuator=1;
 static int wfs_results_num = ((int)DEFAULT_FRAME_RATE);
@@ -136,7 +137,13 @@ static float x_mean_offset=0.0, y_mean_offset=0.0, max_offset=1.0;
 static float aberration_xc[NUM_LENSLETS];
 static float aberration_yc[NUM_LENSLETS];
 static bool use_reference = FALSE;
-static bool use_servo_flat = TRUE;
+static bool last_coude_dichroic_corrections = FALSE;
+static bool use_coude_dichroic_corrections = FALSE;
+static float coude_dichroic_correction_x_amp = 0.0;
+static float coude_dichroic_correction_x_phase = 0.0;
+static float coude_dichroic_correction_y_amp = 0.0;
+static float coude_dichroic_correction_y_phase = 0.0;
+static float last_coude_correction_az = -1.0;
 
 /* Globals. */
 
@@ -202,7 +209,8 @@ void initialize_fsm(void)
 		fsm_mean_dm[i]=DM_DEFAULT;
 		fsm_calc_mean_dm[i]=DM_DEFAULT;
 		fsm_dm_offset[i]=0.0;	
-		last_delta_dm[i]=0.0;	
+		fsm_dm_delta[i]=0.0;	
+		fsm_dm_last_delta[i]=0.0;	
 	}
 	fsm_flat_dm = fsm_flat_dm_spare;
 	current_dichroic = AOB_DICHROIC_SPARE;
@@ -312,7 +320,7 @@ int load_defaults(char* filename_in)
   
   	if ((params_file = fopen(filename,"r")) == NULL ) return -1;
 
-  	if (GetDataLine(s, 80, params_file) == -1)
+  	if (GetDataLine(s, 256, params_file) == -1)
 	{
   		fclose(params_file);
   		return -1;
@@ -326,7 +334,7 @@ int load_defaults(char* filename_in)
 
   	for (i=0;i<NUM_LENSLETS;i++)
 	{
-		if (GetDataLine(s, 80, params_file) == -1)
+		if (GetDataLine(s, 256, params_file) == -1)
 		{
 			fclose(params_file);
 			return -3;
@@ -363,7 +371,7 @@ int load_defaults(char* filename_in)
 	
 	for (i=0;i<NUM_ACTUATORS;i++)
 	{
-		if (GetDataLine(s, 80, params_file) == -1)
+		if (GetDataLine(s, 256, params_file) == -1)
 		{
 			fclose(params_file);
 			return -6;
@@ -380,7 +388,7 @@ int load_defaults(char* filename_in)
 	
 	/* Load the pupil center */
 
-	if (GetDataLine(s, 80, params_file) == -1)
+	if (GetDataLine(s, 256, params_file) == -1)
 	{
 		fclose(params_file);
 		return -10;
@@ -391,6 +399,24 @@ int load_defaults(char* filename_in)
 		fclose(params_file);
 		return -10;
 	}
+
+        /* Load the coude/dichroic correction values */
+
+        if (GetDataLine(s, 256, params_file) == -1)
+        {
+                fclose(params_file);
+                return -11;
+        }
+
+        if (sscanf(s, "%f %f %f %f",
+                &coude_dichroic_correction_x_amp,
+                &coude_dichroic_correction_x_phase,
+                &coude_dichroic_correction_y_amp,
+                &coude_dichroic_correction_y_phase) != 4)
+        {
+                fclose(params_file);
+                return -11;
+        }
 
 	/* Set a flat wavefront. */
 	
@@ -406,7 +432,7 @@ int load_defaults(char* filename_in)
 	 * we get a flat wavefront.
 	 */
 
-	if (set_usb_camera_aoi(x, y, dx, dy)) return -5;
+	if (set_usb_camera_aoi(FALSE, x, y, dx, dy)) return -5;
 
 	fclose(params_file);
 
@@ -455,9 +481,11 @@ int call_load_defaults(int argc, char **argv)
 			 else
 				return error(ERROR,"Failed to set default AOI");
 
-		case -6: return error(ERROR,"Failed to get actuator positions for flat wavefront.");
+		case -6: return 
+	error(ERROR,"Failed to get actuator positions for flat wavefront.");
 		
-		case -7: return error(ERROR,"Failed to get interpret positions for flat wavefront.");
+		case -7: return 
+	error(ERROR,"Failed to get interpret positions for flat wavefront.");
 
 		case -8: return error(ERROR,"Offsets too close to edge.");
 
@@ -465,7 +493,8 @@ int call_load_defaults(int argc, char **argv)
 
 		case -10: return error(ERROR,"Failed to read center position.");
 
-		case -11: return error(ERROR,"Failed to read reference position.");
+		case -11: return error(ERROR,
+                    "Failed to read Coude/Dichroic corrections.");
 
 		default: return error(ERROR,
 				"Unknown problem with loading defaults (%d).",
@@ -542,6 +571,16 @@ int save_defaults(char* filename_in)
 	fprintf(params_file, "# Default center position for pupil\n");
 	fprintf(params_file, "%f %f\n", xpos_center, ypos_center);
 
+        /* Save Coude/Dichroic correction values */
+
+        fprintf(params_file,
+                "# Coude/Dichroic Correction X Amp/Phase Y Amp/Phase\n");
+        fprintf(params_file, "%.2f %.2f %.2f %.2f\n",
+                coude_dichroic_correction_x_amp,
+                coude_dichroic_correction_x_phase,
+                coude_dichroic_correction_y_amp,
+                coude_dichroic_correction_y_phase);
+
 	/* That is all. */
 
 	fclose(params_file);
@@ -589,7 +628,7 @@ int call_save_defaults(int argc, char **argv)
 
 int load_reconstructor(char* filename_in)
 {
-	char filename[256], s[256];
+	char filename[256], s[1024];
 	char *substr;
 	int i,j;
 	FILE *params_file;
@@ -777,13 +816,12 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 		float **data, int aoi_width, int aoi_height)
 {
 	int i,j,l,left,bottom,box_left, box_bottom, poke_sign;
-	float last_servo_gain_flat;
+	float last_servo_gain = 0.0;
 	float new_xc[NUM_LENSLETS];
 	float new_yc[NUM_LENSLETS];
 	float max;
 	float fluxes[NUM_LENSLETS];
 	float new_dm[NUM_ACTUATORS+1];
-	float delta_dm[NUM_ACTUATORS+1];
 	int x,y,dx,dy;
 	bool is_new_actuator=TRUE;
 	float outer_dm_mean = 0.0;
@@ -1034,25 +1072,27 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 		break;
 	
 	case FSM_APPLY_RECON_ONCE: /* Run the servo loop once with gain=1.0 */
-		last_servo_gain_flat = servo_gain_flat;
-		servo_gain_flat = 1.0;
+		last_servo_gain = servo_gain;
+		servo_gain = 1.0;
 		fsm_cyclenum = 0;
 
 	case FSM_SERVO_LOOP:
 
 		for (i=0;i<NUM_ACTUATORS;i++)
 		{
-		    /* 
- 		     * The most likely wavefront is flat, 
- 		     * so damp the DM position to flat
+ 		    /*
+ 		     * Here fsm_cyclenum will only ever be 0 when
+ 		     * the servo is first switched on.
+ 		     * If this is the first time, we set a bunch of things
+ 		     * to zero.
  		     */
 
-		    if (fsm_cyclenum > 0 && 
-			use_servo_flat && 
-			fsm_state ==  FSM_SERVO_LOOP)
-		  	    fsm_dm_offset[i] *= servo_damping_flat;
-		    else
-			    fsm_dm_offset[i] = 0.0;
+		    if(fsm_cyclenum == 0)
+		    {
+			fsm_dm_offset[i] = 0.0;
+			fsm_dm_delta[i] = 0.0;
+			fsm_dm_last_delta[i] = 0.0;
+		    }
 
 		    /* 
  		     * If needed, find the overall tilt. 
@@ -1072,98 +1112,76 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 			ytilt /= NUM_LENSLETS;
 		    }
 
-		    /* Apply the reconstructor */
+		    /* Apply the reconstructor and get the delta for DM */
 
-		    if (use_servo_flat)
+		    for (l=0;l<NUM_LENSLETS;l++)
 		    {
-		      for (l=0;l<NUM_LENSLETS;l++)
-		      {
-			fsm_dm_offset[i] -= 
-			 servo_gain_flat * fsm_reconstructor[i][l]*(new_xc[l]
-				- xtilt + aberration_xc[l]);
-			fsm_dm_offset[i] -= 
-			  servo_gain_flat*fsm_reconstructor[i][NUM_LENSLETS+l] *
+			fsm_dm_delta[i] = -1.0 * 
+				fsm_reconstructor[i][l] *
+				(new_xc[l] - xtilt + aberration_xc[l]);
+			fsm_dm_delta[i] = -1.0 * 
+				fsm_reconstructor[i][NUM_LENSLETS+l] *
 				(new_yc[l] - ytilt + aberration_yc[l]);
-		      }
+		    }
+
+		    /* 
+ 		     * The most likely wavefront is flat, 
+ 		     * so damp the DM position to flat
+ 		     */
+
+		    if (fsm_state == FSM_SERVO_LOOP)
+			fsm_dm_offset[i] *= servo_memory;
+
+		    /* Now apply the servo to the new delta */
+
+		    fsm_dm_offset[i] += (servo_gain * fsm_dm_delta[i] -
+			servo_damping * fsm_dm_last_delta[i]);
+
+		    /* We will need these for the next round */
+
+		    fsm_dm_last_delta[i] = fsm_dm_delta[i];
+
 #ifdef ENFORCE_ZERO_PISTON
-		      if (i >= NUM_INNER_ACTUATORS)
+		    if (i >= NUM_INNER_ACTUATORS)
 			outer_dm_mean += fsm_dm_offset[i];
 #endif
-		    }
-		    else
-		    {
-		      for (l=0;l<NUM_LENSLETS;l++)
-		      {
-			fsm_dm_offset[i] -= 
-			 fsm_reconstructor[i][l]*(new_xc[l] - xtilt + 
-				aberration_xc[l]);
-			fsm_dm_offset[i] -= 
-			  fsm_reconstructor[i][NUM_LENSLETS+l] *
-				(new_yc[l] - ytilt + aberration_yc[l]);
-		      }
-		    }
 		}
 
-		/* Add in the flat wavefront. */
 
-	        if (use_servo_flat)
-		{
-		    /* Work out avergae on the edge */
+		/* Work out avergae on the edge */
 
 #ifdef ENFORCE_ZERO_PISTON
-		    outer_dm_mean /= (NUM_ACTUATORS - NUM_INNER_ACTUATORS);
+		outer_dm_mean /= (NUM_ACTUATORS - NUM_INNER_ACTUATORS);
 #endif
+		/* Add in the flat wavefront and remove piston. */
 
-		    for (i=0;i<NUM_ACTUATORS;i++)
-		    {
+		for (i=0;i<NUM_ACTUATORS;i++)
+		{
 		        new_dm[i+1] = fsm_flat_dm[i] + fsm_dm_offset[i];
-
+		
 #ifdef ENFORCE_ZERO_PISTON
 			if (i >= NUM_INNER_ACTUATORS)
 				new_dm[i+1] -= outer_dm_mean;
-#endif
-		    }
-		    
-		}
-		else
-		{
-		    for (i=0;i<NUM_ACTUATORS;i++)
-		    {
-			delta_dm[i] = servo_gain_delta * fsm_dm_offset[i] -
-				servo_damping_delta * last_delta_dm[i];
-			last_delta_dm[i] = delta_dm[i];
-			new_dm[i+1] = edac40_current_value(i+1) + delta_dm[i];
-
-#ifdef ENFORCE_ZERO_PISTON
-			if (i > NUM_INNER_ACTUATORS)
-			  outer_dm_mean += (new_dm[i] - fsm_flat_dm[i]);
-#endif
-		    }
-		    
-#ifdef ENFORCE_ZERO_PISTON
-		    outer_dm_mean /= (NUM_ACTUATORS - NUM_INNER_ACTUATORS);
-
-		    for (i=NUM_INNER_ACTUATORS;i<NUM_ACTUATORS;i++)
-		    {
-			new_dm[i] -= outer_dm_mean;
-		    }
 #endif
 		}
 
 	        /* Limit positions to the range 0 to 1 */
 
-	        if (new_dm[i+1] > 1)
-		{
+		for (i=0;i<NUM_ACTUATORS;i++)
+                {
+	            if (new_dm[i+1] > 1)
+		    {
 			if (fsm_state != FSM_APPLY_RECON_ONCE)
 			 	fsm_dm_offset[i] -= new_dm[i+1]-1;
 			new_dm[i+1] = 1.0;
-		}
+		    }
 
-		if (new_dm[i+1] < 0)
-		{
+		    if (new_dm[i+1] < 0)
+		    {
 			if (fsm_state != FSM_APPLY_RECON_ONCE)
 			 	fsm_dm_offset[i] -= new_dm[i+1];
 			new_dm[i+1] = 0.0;
+		    }
 		}
 
 		/* Send off the DM command! */
@@ -1180,7 +1198,7 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 		{
 			fsm_state = FSM_CENTROIDS_ONLY;
 			fsm_cyclenum = 0;
-			servo_gain_flat = last_servo_gain_flat;
+			servo_gain = last_servo_gain;
 		}
 		break;
 
@@ -1557,8 +1575,7 @@ int fsm_status(void)
 			wprintw(status_window, " Recon %2d  ", actuator);
 			break;
 		case FSM_SERVO_LOOP:
-			wprintw(status_window, " Servo Active ");
-			break;
+			wprintw(status_window, " Servo ON   ");
 		default:
 			wprintw(status_window, "UNKNOWN");
 	}
@@ -1583,52 +1600,74 @@ int fsm_status(void)
 	wprintw(status_window, s );
 
 	/* Check on the scope_dichroic_mapping function */
-	if (scope_dichroic_mapping) {
-		if ( (scope_dichroic_mapping_step == DICHROIC_MAPPING_ALIGN) && (!autoalign_scope_dichroic) ){
-			/* Have we moved all the way around? */
-			if (fmod(telescope_status.az - initial_mapping_az + 15  + 360,360) < 10.0){
-				scope_dichroic_mapping = FALSE;
-				fclose(scope_dichroic_mapping_file);
-				message(system_window,
-				"Dichroic mapping complete!");
-				send_labao_text_message("%s",
-				"Dichroic mapping complete!");
-			} else {
-				/* Write out the autoalign total from the last alignment */
-				fprintf(scope_dichroic_mapping_file, "1 %5.1f %6.2f %6.2f\n", 
-				 telescope_status.az, autoalign_x_total, autoalign_y_total);
-				fflush(scope_dichroic_mapping_file);
-				/* Time to rotate the telescope */
-				scope_dichroic_mapping_step = DICHROIC_MAPPING_ROTATE;
-				pos.el = telescope_status.el;
-				target_telescope_az = telescope_status.az + 10;
-				pos.az = target_telescope_az;
-				mess.type = TELESCOPE_ELAZ;
-				mess.data = (unsigned char *)&pos;
-				mess.length = sizeof(pos);
-				send_message(telescope_server, &mess);
-			}
-		}
-		
-		if ( (scope_dichroic_mapping_step == DICHROIC_MAPPING_ROTATE) && 
-		     (fabs(telescope_status.az - target_telescope_az)<0.1) ){
-		/* This is only a rough sanity check... !!! the number should be checked */
-			if (current_total_flux < 200){
-				scope_dichroic_mapping = FALSE;
-				fclose(scope_dichroic_mapping_file);
-				message(system_window,
-				"Giving up on scope dichroic mapping - low flux.");
-				send_labao_text_message("%s",
-				"Giving up on scope dichroic mapping - low flux.");
-			} else {
-				args[0] = "adich";
-				args[1] = "50"; /* A fixed number of tries.*/
-				start_autoalign_scope_dichroic(2, args);
-				scope_dichroic_mapping_step = DICHROIC_MAPPING_ALIGN;
-			}
-		}
-	}
 
+	if (scope_dichroic_mapping) 
+	{
+	    if ( (scope_dichroic_mapping_step == DICHROIC_MAPPING_ALIGN) &&
+		 (!autoalign_scope_dichroic))
+	    {
+		/* Have we moved all the way around? */
+
+		if (fmod(telescope_status.az - initial_mapping_az + 
+					15  + 360,360) < 10.0)
+		{
+		    scope_dichroic_mapping = FALSE;
+		    use_coude_dichroic_corrections =
+			last_coude_dichroic_corrections;
+		    fclose(scope_dichroic_mapping_file);
+		    message(system_window,"Dichroic mapping complete!");
+		    send_labao_text_message("%s", "Dichroic mapping complete!");
+		} 
+		else 
+		{
+		    /* Write out the autoalign total from the last alignment */
+	
+		    fprintf(scope_dichroic_mapping_file,"1 %5.1f %6.2f %6.2f\n",
+			    telescope_status.az, autoalign_x_total,
+			    autoalign_y_total);
+		    fflush(scope_dichroic_mapping_file);
+
+				/* Time to rotate the telescope */
+
+		    scope_dichroic_mapping_step = DICHROIC_MAPPING_ROTATE;
+		    pos.el = telescope_status.el;
+		    target_telescope_az = telescope_status.az + 10;
+		    pos.az = target_telescope_az;
+		    mess.type = TELESCOPE_ELAZ;
+		    mess.data = (unsigned char *)&pos;
+		    mess.length = sizeof(pos);
+		    send_message(telescope_server, &mess);
+		}
+	    }
+		
+	    if ( (scope_dichroic_mapping_step == DICHROIC_MAPPING_ROTATE) && 
+	         (fabs(telescope_status.az - target_telescope_az)<0.1))
+	    {
+		/* 
+ 		 * This is only a rough sanity check... !!!
+  		 * the number should be checked
+  		 */
+
+		if (current_total_flux < 200)
+		{
+		    scope_dichroic_mapping = FALSE;
+		    use_coude_dichroic_corrections =
+			last_coude_dichroic_corrections;
+		    fclose(scope_dichroic_mapping_file);
+		    message(system_window,
+			"Giving up on scope dichroic mapping - low flux.");
+		    send_labao_text_message("%s",
+			"Giving up on scope dichroic mapping - low flux.");
+		} 
+		else
+		{
+		    args[0] = "adich";
+		    args[1] = "50"; /* A fixed number of tries.*/
+		    start_autoalign_scope_dichroic(2, args);
+		    scope_dichroic_mapping_step = DICHROIC_MAPPING_ALIGN;
+		}
+	    }
+	}
 
 	/* Is there a new mean we can work with? */
 
@@ -1739,130 +1778,137 @@ int fsm_status(void)
 
 		if (autoalign_scope_dichroic && time(NULL) > last_time+2)
 		{
-			/* Is it done? */
-
-			if (fabs(wfs_results.xtilt) < SCOPE_ALIGN_LIMIT &&
-			    fabs(wfs_results.ytilt) < SCOPE_ALIGN_LIMIT)
-			{
-				autoalign_scope_dichroic = FALSE;
-				autoalign_count = 0;
-				message(system_window,
+		    /* Is it done? */
+        
+		    if (fabs(wfs_results.xtilt) < SCOPE_ALIGN_LIMIT &&
+		        fabs(wfs_results.ytilt) < SCOPE_ALIGN_LIMIT)
+		    {
+			autoalign_scope_dichroic = FALSE;
+			autoalign_count = 0;
+			message(system_window,
 					"Scope Autoalignment is complete.");
-				send_labao_text_message("%s", 
+			send_labao_text_message("%s", 
 					"Scope Autoalignment is complete.");
-				pthread_mutex_unlock(&fsm_mutex);
-				return NOERROR;
-			}
+			last_coude_correction_az = telescope_status.az;
+			pthread_mutex_unlock(&fsm_mutex);
+			return NOERROR;
+		    }
 
-			/* Have we tried too many times? */
+		    /* Have we tried too many times? */
 
-			if (--autoalign_count < 0)
+		    if (--autoalign_count < 0)
+		    {
+			autoalign_scope_dichroic = FALSE;
+			autoalign_count = 0;
+			if (scope_dichroic_mapping)
 			{
-				autoalign_scope_dichroic = FALSE;
-				autoalign_count = 0;
-				if (scope_dichroic_mapping){
-					scope_dichroic_mapping = FALSE;
-					fclose(scope_dichroic_mapping_file);
-					message(system_window,
-					"Giving up on scope dichroic mapping - autoalignment fail.");
-					send_labao_text_message("%s",
-					"Giving up on scope dichroic mapping - autoalignment fail.");
-				} else {
-					message(system_window,
-					"Giving up on scope autoalignment.");
-					send_labao_text_message("%s",
-					"Giving up on scope autoalignment.");
-				}
-				fprintf(scope_dichroic_mapping_file, "0 %5.1f %6.2f %6.2f\n", 
-				 telescope_status.az, autoalign_x_total, autoalign_y_total);
-				fflush(scope_dichroic_mapping_file);
-				pthread_mutex_unlock(&fsm_mutex);
-				return NOERROR;
-			}
-
-			/* OK, move things in appropriate ways */
-
-			mess.type = HUT_AOB_MOVE_RELATIVE;
-			mess.length = sizeof(motor_move);
-			mess.data = (unsigned char *)&motor_move;
-
-			/* First we need to rotate into the right frame */
-#warning Despite this being totally wrong in principle (120 degree offset between axes) there used to be an 8 degrees below82
-			theta = -telescope_status.az/180.0*M_PI;
-			x = - cos(theta) * wfs_results.xtilt +
-			    sin(theta) * wfs_results.ytilt;
-			y = - sin(theta) * wfs_results.xtilt -
-			    cos(theta) * wfs_results.ytilt;
-
-			/* Tell the user */
-
-			sprintf(s, "Az %5.1f %d X = %.2f/%.2f Y = %.2f/%.2f -", 
-			telescope_status.az, autoalign_count+1, 
-			wfs_results.xtilt, x, wfs_results.ytilt, y);
-			if (autoalign_count % 2)
-			{
-			    if (x > SCOPE_ALIGN_LIMIT)
-			    {
-				motor_move.motor = AOB_DICHR_2;
-				motor_move.position = SCOPE_ALIGN_STEP + 
-					(int)(fabs(x)*SCOPE_ALIGN_GAIN);
-				autoalign_x_total += SCOPE_ALIGN_STEP + 
-					(int)(fabs(x)*SCOPE_ALIGN_GAIN);
-				send_message(telescope_server, &mess);
-				strcat(s," Moving RIGHT");
-			    }
-			    else if (x < -1.0*SCOPE_ALIGN_LIMIT)
-			    {
-				motor_move.motor = AOB_DICHR_2;
-				motor_move.position = -1.0*(SCOPE_ALIGN_STEP  + 
-					(int)(fabs(x)*SCOPE_ALIGN_GAIN));
-				autoalign_x_total -= SCOPE_ALIGN_STEP  + 
-					(int)(fabs(x)*SCOPE_ALIGN_GAIN);
-				send_message(telescope_server, &mess);
-				strcat(s," Moving LEFT");
-			    }
-			    else
-			    {
-				strcat(s, "X OK.");
-			    }
+			    scope_dichroic_mapping = FALSE;
+			    use_coude_dichroic_corrections =
+				last_coude_dichroic_corrections;
+			    fclose(scope_dichroic_mapping_file);
+			    message(system_window,
+		"Giving up on scope dichroic mapping - autoalignment fail.");
+			    send_labao_text_message("%s",
+		"Giving up on scope dichroic mapping - autoalignment fail.");
 			}
 			else
 			{
-			    if (y > SCOPE_ALIGN_LIMIT)
-			    {
-				motor_move.motor = AOB_DICHR_1;
-				motor_move.position = SCOPE_ALIGN_STEP + 
-					(int)(fabs(y)*SCOPE_ALIGN_GAIN);
-				autoalign_y_total += SCOPE_ALIGN_STEP + 
-					(int)(fabs(y)*SCOPE_ALIGN_GAIN); 
-				send_message(telescope_server, &mess);
-				strcat(s," Moving UP");
-			    }
-			    else if (y < -1.0 * SCOPE_ALIGN_LIMIT)
-			    {
-				motor_move.motor = AOB_DICHR_1;
-				motor_move.position = -1.0*(SCOPE_ALIGN_STEP + 
-					(int)(fabs(y)*SCOPE_ALIGN_GAIN));
-				autoalign_y_total -= SCOPE_ALIGN_STEP + 
-					(int)(fabs(y)*SCOPE_ALIGN_GAIN);
-				send_message(telescope_server, &mess);
-				strcat(s," Moving DOWN");
-			    }
-			    else
-			    {
-				strcat(s, "Y OK.");
-			    }
+			    message(system_window,
+					"Giving up on scope autoalignment.");
+			    send_labao_text_message("%s",
+					"Giving up on scope autoalignment.");
 			}
+			fprintf(scope_dichroic_mapping_file,
+			    "0 %5.1f %6.2f %6.2f\n", 
+			    telescope_status.az, autoalign_x_total, 
+			    autoalign_y_total);
+			fflush(scope_dichroic_mapping_file);
+			pthread_mutex_unlock(&fsm_mutex);
+			return NOERROR;
+		    }
 
-			message(system_window,s);
-			send_labao_text_message("%s", s);
+		    /* OK, move things in appropriate ways */
 
-			/* OK, this is now done */
+		    mess.type = HUT_AOB_MOVE_RELATIVE;
+		    mess.length = sizeof(motor_move);
+		    mess.data = (unsigned char *)&motor_move;
 
-			last_time = time(NULL);
+		    /* First we need to rotate into the right frame */
+#warning Despite this being totally wrong in principle (120 degree offset between axes) there used to be an 8 degrees below82
+		    theta = -telescope_status.az/180.0*M_PI;
+		    x = - cos(theta) * wfs_results.xtilt +
+		        sin(theta) * wfs_results.ytilt;
+		    y = - sin(theta) * wfs_results.xtilt -
+			cos(theta) * wfs_results.ytilt;
+
+		    /* Tell the user */
+
+		    sprintf(s, "Az %5.1f %d X = %.2f/%.2f Y = %.2f/%.2f -", 
+			telescope_status.az, autoalign_count+1, 
+			wfs_results.xtilt, x, wfs_results.ytilt, y);
+		    if (autoalign_count % 2)
+		    {
+			if (x > SCOPE_ALIGN_LIMIT)
+			{
+			      motor_move.motor = AOB_DICHR_2;
+			      motor_move.position = SCOPE_ALIGN_STEP + 
+				(int)(fabs(x)*SCOPE_ALIGN_GAIN);
+			      autoalign_x_total += SCOPE_ALIGN_STEP + 
+				(int)(fabs(x)*SCOPE_ALIGN_GAIN);
+			      send_message(telescope_server, &mess);
+			      strcat(s," Moving RIGHT");
+			}
+			else if (x < -1.0*SCOPE_ALIGN_LIMIT)
+			{
+			      motor_move.motor = AOB_DICHR_2;
+			      motor_move.position = -1.0*(SCOPE_ALIGN_STEP  + 
+				(int)(fabs(x)*SCOPE_ALIGN_GAIN));
+			      autoalign_x_total -= SCOPE_ALIGN_STEP  + 
+				(int)(fabs(x)*SCOPE_ALIGN_GAIN);
+			      send_message(telescope_server, &mess);
+			      strcat(s," Moving LEFT");
+			}
+			else
+			{
+			      strcat(s, "X OK.");
+			}
+		    }
+		    else
+		    {
+			if (y > SCOPE_ALIGN_LIMIT)
+			{
+			    motor_move.motor = AOB_DICHR_1;
+			    motor_move.position = SCOPE_ALIGN_STEP + 
+				(int)(fabs(y)*SCOPE_ALIGN_GAIN);
+			    autoalign_y_total += SCOPE_ALIGN_STEP + 
+				(int)(fabs(y)*SCOPE_ALIGN_GAIN); 
+			    send_message(telescope_server, &mess);
+			    strcat(s," Moving UP");
+			}
+			else if (y < -1.0 * SCOPE_ALIGN_LIMIT)
+			{
+			    motor_move.motor = AOB_DICHR_1;
+			    motor_move.position = -1.0*(SCOPE_ALIGN_STEP + 
+				(int)(fabs(y)*SCOPE_ALIGN_GAIN));
+			    autoalign_y_total -= SCOPE_ALIGN_STEP + 
+				(int)(fabs(y)*SCOPE_ALIGN_GAIN);
+			    send_message(telescope_server, &mess);
+			    strcat(s," Moving DOWN");
+			}
+		        else
+		        {
+			    strcat(s, "Y OK.");
+			}
+		    }
+
+		    message(system_window,s);
+		    send_labao_text_message("%s", s);
+
+		    /* OK, this is now done */
+
+		    last_time = time(NULL);
 		}
 
-#warning This bit needs coma also.
 		if (autoalign_zernike && time(NULL) > last_time)
 		{
 			/* Is it done? */
@@ -2279,23 +2325,38 @@ int edit_wfs_results_num(int argc, char **argv)
 int start_scope_dichroic_mapping(int argc, char **argv)
 {
 	char *args[2], filename[80], data_dir[80];
+
 	/* Sanity check here so we don't get ourselves stuck. */
-	if (scope_dichroic_mapping) return error(ERROR, "Already mapping the scope dichroic positions.");
+
+	if (scope_dichroic_mapping) return error(ERROR,
+		"Already mapping the scope dichroic positions.");
 
 	/* Make sure we start off close to 0 azimuth */
-	if ((telescope_status.az > 85) && (telescope_status.az < 275))
-	 return error(ERROR, "Telescope azimuth must be within 85 degrees of North to start!");
 
-	sprintf(filename, "%s/%s_dich_map.dat", get_data_directory(data_dir), labao_name);
+	if ((telescope_status.az > 85) && (telescope_status.az < 275))
+		return error(ERROR,
+	"Telescope azimuth must be within 85 degrees of North to start!");
+
+	sprintf(filename, "%s/%s_dich_map.dat", get_data_directory(data_dir),
+		labao_name);
+
 	if ( (scope_dichroic_mapping_file = fopen(filename, "w")) == NULL ) 
 		return error(ERROR, "Could not open dichroic mapping file");
 
 	/* Start with a dichroic alignment */
+
 	args[0] = "adich";
 	args[1] = "50"; /* A fixed number of tries.*/
 	start_autoalign_scope_dichroic(2, args);
-	/* Set the initial azimuth... apart from that it is just a matter of seeting some local globals */
+
+	/* 
+         * Set the initial azimuth... apart from that it 
+         * is just a matter of seeting some local globals
+ 	 */
+
 	initial_mapping_az = telescope_status.az;
+	last_coude_dichroic_corrections = use_coude_dichroic_corrections;
+	use_coude_dichroic_corrections = FALSE;
 	scope_dichroic_mapping_step = DICHROIC_MAPPING_ALIGN;
 	scope_dichroic_mapping = TRUE;
 
@@ -2369,6 +2430,8 @@ int start_autoalign_lab_dichroic(int argc, char **argv)
 int start_autoalign_scope_dichroic(int argc, char **argv)
 {
         char    s[100];
+	struct smessage mess;
+        struct s_aob_move_motor motor_move;
 
 	if (autoalign_lab_dichroic || autoalign_zernike)
 		return error(ERROR,"Already running Auto Alignment.");
@@ -2389,6 +2452,40 @@ int start_autoalign_scope_dichroic(int argc, char **argv)
 	} 
 
 	if (open_telescope_connection(0, NULL) != NOERROR) return ERROR;
+
+        /* First has there been a large jump? */
+
+        if (last_coude_correction_az >= 0.0 && use_coude_dichroic_corrections)
+        {
+                mess.type = HUT_AOB_MOVE_RELATIVE;
+                mess.length = sizeof(motor_move);
+                mess.data = (unsigned char *)&motor_move;
+
+                motor_move.motor = AOB_DICHR_2;
+                motor_move.position =
+                        coude_dichroic_correction_x_amp * (
+                        sin((telescope_status.az  +
+                             coude_dichroic_correction_x_phase)/180.0*M_PI) -
+                        sin((last_coude_correction_az  +
+                             coude_dichroic_correction_x_phase)/180.0*M_PI));
+                message(system_window,"Moving large offset dX = %d",
+			motor_move.position);
+                send_message(telescope_server, &mess);
+
+                sleep(1);
+
+                motor_move.motor = AOB_DICHR_1;
+                motor_move.position =
+                        coude_dichroic_correction_y_amp * (
+                        sin((telescope_status.az  +
+                             coude_dichroic_correction_y_phase)/180.0*M_PI) -
+                        sin((last_coude_correction_az  +
+                             coude_dichroic_correction_y_phase)/180.0*M_PI));
+                message(system_window,"Moving large offset dY = %d",
+			motor_move.position);
+                send_message(telescope_server, &mess);
+                sleep(1);
+	}
 
 	message(system_window,"Scope autoalignment begins Trys = %d",
 		autoalign_count);
@@ -2454,9 +2551,11 @@ int stop_autoalign(int argc, char **argv)
 	autoalign_scope_dichroic = FALSE;
 	autoalign_zernike = FALSE;
 	use_reference_off();
-        if (scope_dichroic_mapping){
-			scope_dichroic_mapping = FALSE;
-			fclose(scope_dichroic_mapping_file);
+        if (scope_dichroic_mapping)
+	{
+	    use_coude_dichroic_corrections = last_coude_dichroic_corrections;
+	    scope_dichroic_mapping = FALSE;
+	    fclose(scope_dichroic_mapping_file);
 	}
 
 	message(system_window, "Auto alignment has been stopped.");
@@ -2468,25 +2567,18 @@ int stop_autoalign(int argc, char **argv)
 /************************************************************************/
 /* edit_servo_parameters()						*/
 /*									*/
-/* Edit gain and damping of servo.					*/
+/* Edit gain etx of servo.						*/
 /************************************************************************/
 
 int edit_servo_parameters(int argc, char **argv)
 {
-        char    s[100]; float	gain, damping;
+        char    s[100]; float	gain, memory, damping;
 
         /* Check out the command line */
 
-	if (use_servo_flat)
-	{
-		gain = servo_gain_flat;
-		damping = servo_damping_flat;
-	}
-	else
-	{
-		gain = servo_gain_delta;
-		damping = servo_damping_delta;
-	}
+	gain = servo_gain;
+	damping = servo_damping;
+	memory = servo_memory;
 
         if (argc > 1)
         {
@@ -2501,8 +2593,8 @@ int edit_servo_parameters(int argc, char **argv)
                 sscanf(s,"%f",&gain);
         }
 
-	if (gain < 0.0 || gain > 1.0) return 
-		error(ERROR,"Gain must be between 0 and 1.");
+	if (gain < 0.0 || gain > 2.0) return 
+		error(ERROR,"Gain must be between 0 and 2.");
 
         if (argc > 2)
         {
@@ -2512,7 +2604,7 @@ int edit_servo_parameters(int argc, char **argv)
         {
                 clean_command_line();
                 sprintf(s,"%9.2f", damping);
-                if (quick_edit("Servo Damping",s,s,NULL,FLOAT)
+                if (quick_edit("Servo Memory",s,s,NULL,FLOAT)
                    == KEY_ESC) return NOERROR;
                 sscanf(s,"%f",&damping);
         }
@@ -2520,16 +2612,25 @@ int edit_servo_parameters(int argc, char **argv)
 	if (damping < 0.0 || damping > 1.0) return 
 		error(ERROR,"Damping must be between 0 and 1.");
 
-	if (use_servo_flat)
-	{
-		servo_gain_flat = gain;
-		servo_damping_flat = damping;
-	}
-	else
-	{
-		servo_gain_delta = gain;
-		servo_damping_delta = damping;
-	}
+        if (argc > 3)
+        {
+                sscanf(argv[3],"%f",&memory);
+        }
+        else
+        {
+                clean_command_line();
+                sprintf(s,"%9.2f", memory);
+                if (quick_edit("Servo Memory",s,s,NULL,FLOAT)
+                   == KEY_ESC) return NOERROR;
+                sscanf(s,"%f",&memory);
+        }
+
+	if (memory < 0.0 || memory > 1.0) return 
+		error(ERROR,"Memory must be between 0 and 1.");
+
+	servo_gain = gain;
+	servo_damping = damping;
+	servo_memory = memory;
 
 	return NOERROR;
 
@@ -2545,7 +2646,6 @@ int move_boxes(int argc, char **argv)
 {
         char    s[100];
 	float	dx, dy;
-	int	i;
 
         /* Check out the command line */
 
@@ -2575,13 +2675,29 @@ int move_boxes(int argc, char **argv)
                 sscanf(s,"%f",&dy);
         }
 
-  	for (i=0;i<NUM_LENSLETS;i++)
-	{
-		x_centroid_offsets[i] += dx;
-		y_centroid_offsets[i] += dy;
-	}
+	move_centroids(dx, dy);
 
 	return NOERROR;
+
+} /* move_boxes() */
+
+/************************************************************************/
+/* move_centroids()                                                     */
+/*                                                                      */
+/* Move centroid boxes by a small amount.                               */
+/************************************************************************/
+
+void move_centroids(float dx, float dy)
+{
+        int     i;
+
+        for (i=0;i<NUM_LENSLETS;i++)
+        {
+                x_centroid_offsets_beacon[i] += dx;
+                y_centroid_offsets_beacon[i] += dy;
+                x_centroid_offsets_reference[i] += dx;
+                y_centroid_offsets_reference[i] += dy;
+        }
 
 } /* move_boxes() */
 
@@ -2771,7 +2887,8 @@ void complete_aberrations_record(void)
 	"# Time     Tilt X  Tilt Y   Pos X   Pos Y   Focus    A1      A2      C1     C2\n");
 	
 	for(i=0; i< aberrations_record_num; i++)
-		fprintf(fp, "%9d %7.4f %7.4f %7.4f %7.4f %7.4f %7.4f %7.4 %7.4f %7.4f\n",
+		fprintf(fp,
+		"%9d %7.4f %7.4f %7.4f %7.4f %7.4f %7.4f %7.4f %7.4f %7.4f\n",
 			aberrations_record[i].time_stamp,			
 			aberrations_record[i].xtilt,			
 			aberrations_record[i].ytilt,			
@@ -3037,31 +3154,6 @@ void use_reference_off(void)
 } /* use_reference_off */
 
 /************************************************************************/
-/* toggle_use_servo_flat()						*/
-/*									*/
-/* Switch between servo types.						*/
-/************************************************************************/
-
-int toggle_use_servo_flat(int argc, char **argv)
-{
-	use_servo_flat = !use_servo_flat;
-
-	if (use_servo_flat)
-	{
-	    message(system_window, "Using servo FLAT.");
-	    send_labao_text_message( "Using servo FLAT.");
-	}
-	else
-	{
-	    message(system_window, "Using servo DELTA.");
-	    send_labao_text_message( "Using servo DELTA.");
-	}
-
-	return NOERROR;
-
-} /* toggle_use_servo_flat() */
-
-/************************************************************************/
 /* select_dichroic().							*/
 /*									*/
 /* Attempts to select a dichroic.					*/
@@ -3156,3 +3248,107 @@ int message_aob_change_dichroic(struct smessage *message)
 
 } /* message_aob_change_dichroic() */
 
+/************************************************************************/
+/* toggle_coude_dichroic_corrections() 		    			*/
+/*									*/
+/* Toggle if we are going to use the coude rotation based dichroic	*/
+/* position correctors.							*/
+/************************************************************************/
+
+int toggle_coude_dichroic_corrections(int argc, char **argv)
+{
+	if (use_coude_dichroic_corrections)
+	{
+		use_coude_dichroic_corrections=FALSE;
+		message(system_window, 
+			"Not using Coude based Dichroic corrections.");
+		send_labao_text_message(
+			"Not using Coude based Dichroic corrections.");
+	}
+	else
+	{
+		use_coude_dichroic_corrections=TRUE;
+		message(system_window, 
+			"Using Coude based Dichroic corrections.");
+		send_labao_text_message(
+			"Using Coude based Dichroic corrections.");
+	}
+
+	return NOERROR;
+
+} /* toggle_coude_dichroic_corrections */
+
+/************************************************************************/
+/* edit_coude_dichroic_corrections()					*/
+/*									*/
+/* Let's you change the coude cdichroic correction values.		*/
+/************************************************************************/
+
+int edit_coude_dichroic_corrections(int argc, char **argv)
+{
+        char    s[100];
+	float	new_x_amp, new_x_phase;
+	float	new_y_amp, new_y_phase;
+
+        /* Check out the command line */
+
+        if (argc > 1)
+        {
+                sscanf(argv[1],"%f",&new_x_amp);
+        }
+        else
+        {
+                clean_command_line();
+                sprintf(s,"%9f", coude_dichroic_correction_x_amp);
+                if (quick_edit("Coude/Dichroic X Amplitude",s,s,NULL,FLOAT)
+                   == KEY_ESC) return NOERROR;
+                sscanf(s,"%f",&new_x_amp);
+        }
+
+        if (argc > 2)
+        {
+                sscanf(argv[2],"%f",&new_x_phase);
+        }
+        else
+        {
+                clean_command_line();
+                sprintf(s,"%9f", coude_dichroic_correction_x_phase);
+                if (quick_edit("Coude/Dichroic X Phase",s,s,NULL,FLOAT)
+                   == KEY_ESC) return NOERROR;
+                sscanf(s,"%f",&new_x_phase);
+        }
+
+        if (argc > 3)
+        {
+                sscanf(argv[3],"%f",&new_y_amp);
+        }
+        else
+        {
+                clean_command_line();
+                sprintf(s,"%9f", coude_dichroic_correction_y_amp);
+                if (quick_edit("Coude/Dichroic Y Amplitude",s,s,NULL,FLOAT)
+                   == KEY_ESC) return NOERROR;
+                sscanf(s,"%f",&new_y_amp);
+        }
+
+        if (argc > 4)
+        {
+                sscanf(argv[4],"%f",&new_y_phase);
+        }
+        else
+        {
+                clean_command_line();
+                sprintf(s,"%9f", coude_dichroic_correction_y_phase);
+                if (quick_edit("Coude/Dichroic Y Phase",s,s,NULL,FLOAT)
+                   == KEY_ESC) return NOERROR;
+                sscanf(s,"%f",&new_y_phase);
+        }
+
+	coude_dichroic_correction_x_amp = new_x_amp;
+	coude_dichroic_correction_x_phase = new_x_phase;
+	coude_dichroic_correction_y_amp = new_y_amp;
+	coude_dichroic_correction_y_phase = new_y_phase;
+
+	return NOERROR;
+
+} /* edit_coude_dichroic_corrections() */

@@ -141,10 +141,11 @@ struct {
 		{"addab",       call_add_wfs_aberration},
 		{"tur",       	toggle_use_reference},
 		{"togref",     	toggle_use_reference},
-		{"tusf",     	toggle_use_servo_flat},
 		{"dichmap",     start_scope_dichroic_mapping},
 		{"dichroic",	select_dichroic},
 		{"dich",	select_dichroic},
+		{"tcdc",        toggle_coude_dichroic_corrections},
+                {"ecdc",        edit_coude_dichroic_corrections},
 
 		/* Function set for tiptilt messages */
 

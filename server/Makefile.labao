@@ -30,8 +30,7 @@
 
 CC = gcc
 KCC = kgcc
-#LCFLAGS = -g -O2 -Wall -DUSE_RT
-#LCFLAGS = -g -Wall -DUSE_RT
+LCFLAGS = -g -O2 -Wall
 LFLAGS = -lueye_api -lzernike -ledac40 -lastroui -lastromod -lclockui -lcharaui -lchara -lcfitsio -lncurses -lnsimpleX -lX11 -lsla -lnrc -luipico -luiclient -lsockman -lclient -lrwfits -lnrc -pthread -lm -lz 
 MODDIR = /usr/local/modules
 LIBDIR = /usr/local/lib
@@ -43,7 +42,7 @@ ETCDIR = /ctrscrut/chara/etc
 # The targets
 #
 
-all: labao 
+all: labao fit_dich_map
 
 #
 # The application target. This is to run in straight linux
@@ -71,20 +70,25 @@ $(OFILES): labao.h
 labao: $(OFILES) labao.h
 	${CC} -o labao $(OFILES) $(LFLAGS)
 
+fit_dich_map: fit_dich_map.c
+	${CC} -o fit_dich_map fit_dich_map.c ${LCFLAGS} -lnrc -lm
+
 #
 # Cleanup
 #
 
 clean:
-	rm -f core *~ $(OFILES) labao zernike_test.dat
+	rm -f core *~ $(OFILES) labao zernike_test.dat fit_dich_map
 
 #
 # install
 #
 
-install: labao labao_help.ini labao_menus.ini run_labao 
+install: labao labao_help.ini labao_menus.ini run_labao fit_dich_map
 	cp labao $(BINDIR)/labao
 	chmod a+rx $(BINDIR)/labao
+	cp fit_dich_map $(BINDIR)/fit_dich_map
+	chmod a+rx $(BINDIR)/fit_dich_map
 	cp run_labao $(BINDIR)/run_labao
 	chmod a+rx $(BINDIR)/run_labao 
 	cp labao_help.ini $(BINDIR)/labao_help.ini
@@ -100,6 +104,7 @@ install: labao labao_help.ini labao_menus.ini run_labao
 
 uninstall:
 	rm -f $(BINDIR)/labao
+	rm -f $(BINDIR)/fit_dich_map
 	rm -f $(BINDIR)/run_labao
 	rm -f $(BINDIR)/labao_help.ini
 	rm -f $(BINDIR)/labao_menus.ini

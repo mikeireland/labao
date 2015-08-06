@@ -36,11 +36,11 @@
 void setup_background_jobs(void)
 {
 	set_top_job(labao_top_job);
-        background_add(linux_time_status);
-        background_add(rt_time_status);
-        background_add(edac40_status);
-        background_add(usb_camera_status);
-	background_add(fsm_status);
+	background_add_name(linux_time_status,"Linux Time");
+	background_add_name(rt_time_status, "RT Time");
+	background_add_name(edac40_status,"EDAC40");
+	background_add_name(usb_camera_status, "Camera");
+	background_add_name(fsm_status, "FSM");
 
 } /* setup_background_jobs() */
 
@@ -66,7 +66,7 @@ int linux_time_status(void)
 {
 	time_t current_time;
 	struct tm *now;
-	static last_time = 0;
+	static time_t last_time = 0;
 
 	time(&current_time);
 	now = localtime(&current_time);

@@ -600,8 +600,6 @@ int message_labao_add_wfs_aberration(struct smessage *message)
 
 int message_labao_zero_wfs_aberration(struct smessage *message)
 {
-	struct s_labao_eda40_set_channel *data;
-
 	if (message->length != 0)
 		return error(ERROR,"LABAO_ZERO_WFS_ABERRATION with wrong data");
 
@@ -671,8 +669,6 @@ int message_labao_save_defaults(struct smessage *message)
 
 int message_labao_reopen_tiptilt(struct smessage *message)
 {
-	char	*args[2];
-
 	if (message->length != 0) 
 		return error(ERROR,"LABAO_REOPEN_TIPTILT with wrong data");
 
