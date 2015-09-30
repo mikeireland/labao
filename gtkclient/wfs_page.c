@@ -407,13 +407,19 @@ void fill_wfs_page(GtkWidget *vbox)
         gtk_widget_set_usize (button, LABAO_WIDTH/5, LABAO_HEIGHT);
         gtk_widget_show(button);
 
-        button = gtk_button_new_with_label ("PLOT ABER");
+        button = gtk_button_new_with_label ("PLOT");
 	gtk_signal_connect (GTK_OBJECT (button), "clicked",
                 GTK_SIGNAL_FUNC (labao_plot_aber_callback), NULL);
         gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
         gtk_container_set_border_width (GTK_CONTAINER(button),1);
-        gtk_widget_set_usize (button, LABAO_WIDTH/5, LABAO_HEIGHT);
+        gtk_widget_set_usize (button, LABAO_WIDTH/10, LABAO_HEIGHT);
         gtk_widget_show(button);
+
+	fps_entry = gtk_entry_new ();
+        gtk_entry_set_text (GTK_ENTRY (fps_entry),"100");
+        gtk_box_pack_start(GTK_BOX(hbox), fps_entry, TRUE, TRUE, 0);
+        gtk_widget_set_usize (fps_entry, LABAO_WIDTH/10, LABAO_HEIGHT);
+        gtk_widget_show(fps_entry);
 
         button = gtk_button_new_with_label ("FPS");
 	gtk_signal_connect (GTK_OBJECT (button), "clicked",
@@ -423,11 +429,13 @@ void fill_wfs_page(GtkWidget *vbox)
         gtk_widget_set_usize (button, LABAO_WIDTH/15, LABAO_HEIGHT);
         gtk_widget_show(button);
 
-	fps_entry = gtk_entry_new ();
-        gtk_entry_set_text (GTK_ENTRY (fps_entry),"100");
-        gtk_box_pack_start(GTK_BOX(hbox), fps_entry, TRUE, TRUE, 0);
-        gtk_widget_set_usize (fps_entry, LABAO_WIDTH/10, LABAO_HEIGHT);
-        gtk_widget_show(fps_entry);
+        button = gtk_button_new_with_label ("THRSH");
+	gtk_signal_connect (GTK_OBJECT (button), "clicked",
+                GTK_SIGNAL_FUNC (labao_threshold_callback), NULL);
+        gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
+        gtk_container_set_border_width (GTK_CONTAINER(button),1);
+        gtk_widget_set_usize (button, LABAO_WIDTH/15, LABAO_HEIGHT);
+        gtk_widget_show(button);
 
 	/* Eigth row of Buttons */
 
@@ -614,6 +622,33 @@ void labao_set_fps_callback(GtkButton *button, gpointer data)
         }
 
 } /* labao_set_fps_callback() */
+
+/************************************************************************/
+/* labao_threshold_callback()						*/
+/*									*/
+/* Set number to use in mean calcualtions.				*/
+/************************************************************************/
+
+void labao_threshold_callback(GtkButton *button, gpointer data)
+{
+        struct smessage mess;
+	float	threshold;
+        char    *entry;
+
+        entry = (char *)gtk_entry_get_text(GTK_ENTRY(fps_entry));
+        sscanf(entry,"%f", &threshold);
+	gtk_entry_set_text (GTK_ENTRY (fps_entry),"0");
+
+        mess.type = LABAO_SET_THRESHOLD;
+        mess.length = sizeof(float);
+        mess.data = (unsigned char *)&threshold;
+
+        if (!send_message(server, &mess))
+        {
+          print_status(ERROR,"Failed to send LABAO_SET_THRESHOLD message.\n");
+        }
+
+} /* labao_threshold_callback() */
 
 /************************************************************************/
 /* labao_save_aberrations_callback()					*/

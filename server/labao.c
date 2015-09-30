@@ -65,6 +65,7 @@ int     pico_server = -1;
 char    *pico_servers[NUM_PICO_SERVERS] = {"PICO_1", "PICO_2", "PICO_3",
                 "PICO_4", "PICO_5", "PICO_6", "PICO_7"};
 int     telescope_server = -1;
+int     iris_server = -1;
 int	dich_mirror = -1;
 struct SMIRROR_LIST mirror_list[MAX_SERVERS];
 float servo_memory = SERVO_MEMORY;
@@ -75,6 +76,7 @@ float    xpos_center = 0.0;
 float    ypos_center = 0.0;
 struct s_scope_status telescope_status;
 bool send_tiptilt = FALSE;
+bool iris_at_beam_size = FALSE;
 
 int main(int argc, char **argv)
 {
@@ -265,6 +267,10 @@ void labao_open(void)
 
 	open_telescope_connection(0, NULL);
 
+	/* Open iris server if we can */
+
+	open_iris_connection(0, NULL);
+
 	/* Set default frame rate */
 
 	set_frame_rate(DEFAULT_FRAME_RATE);
@@ -302,11 +308,12 @@ void labao_close(void)
 	message(system_window,"Quiting X");
 	send_labao_text_message("Quiting X");
 	if (display_is_open) quitX();
-	message(system_window,"Closing EDAC40 camera");
-	send_labao_text_message("Closing EDAC40 camera");
+	message(system_window,"Closing EDAC40");
+	send_labao_text_message("Closing EDAC40");
 	close_edac40(0, NULL);
 	if (pico_server != -1) close_server_socket(pico_server);
 	if (telescope_server != -1) close_server_socket(telescope_server);
+	if (iris_server != -1) close_server_socket(iris_server);
 }
 
 /************************************************************************/
@@ -436,3 +443,58 @@ int message_telescope_status(int server, struct smessage *mess)
 	return TRUE;
 
 } /* message_telescope_status() */
+
+/************************************************************************/
+/* open_iris_connection()						*/
+/*									*/
+/* Returns error level.							*/
+/************************************************************************/
+
+int open_iris_connection(int argc, char **argv)
+{
+	if (iris_server != -1) close_server_socket(iris_server);
+
+        iris_server = open_server_by_name("iris");
+
+        if (iris_server < 0)
+        {
+            iris_server = -1;
+           return error(ERROR, "Failed to open socket connect to Iris.");
+        }
+
+	if (!add_message_job(iris_server, 
+			IRIS_STATUS_MESSAGE, message_iris_status))
+        {
+                error(ERROR,"Failed to add server IRIS_STATUS_MESSAGE, job.\n");
+                exit(-8);
+        }
+
+	message(system_window, "Opened connection to Iris Server.");
+	send_labao_text_message("Opened connection to Iris Server.");
+
+	return NOERROR;
+
+} /* start_autoalign_lab_dichroic() */
+
+/************************************************************************/
+/* message_iris_status()                                                */
+/*                                                                      */
+/************************************************************************/
+
+int message_iris_status(int server, struct smessage *mess)
+{
+	int	*status;
+
+        if (mess->length != sizeof(*status))
+        {
+            error(ERROR,"Got IRIS_STATUS with bad data.");
+            return TRUE;
+        }
+
+	status = (int *) mess->data;
+
+	iris_at_beam_size = (*status == IRIS_STATUS_BEAM_SIZE);
+
+	return TRUE;
+
+} /* message_iris_status() */

@@ -1,4 +1,3 @@
 Sometimes crashes on line 544 of USB stuff when you reload the default.
 and 1068
 Also it is locking on line 356 of USB stuff.
-We need to add mean and stddev calculation to dark frame and use it for thresholding the data just as we do in WFS2

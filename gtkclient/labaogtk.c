@@ -2,6 +2,8 @@
 /* labaogtk.c                                                           */
 /*                                                                      */
 /* Main routine for LABAO  GTK client. 		                        */
+/*									*/
+/* 2.0 - Added threshold control.					*/
 /************************************************************************/
 /*                                                                      */
 /*                    CHARA ARRAY USER INTERFACE                        */
@@ -197,7 +199,8 @@ int main(int  argc, char *argv[] )
 
 	/* Set name of window */
 
-	gtk_window_set_title (GTK_WINDOW (window), server_name);
+	sprintf(s,"%s V2.0", server_name); 
+	gtk_window_set_title (GTK_WINDOW (window), s);
 
 	/* Set a handler for delete_event that immediately exits GTK. */
 

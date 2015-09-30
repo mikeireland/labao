@@ -79,6 +79,7 @@ static int usb_camera_display_frames = 0;
 static bool usb_camera_local_display = FALSE;
 static int data_record_start = 0;
 static int data_record_stop = 0;
+static float dark_stddev = 0.0;
 
 /************************************************************************/
 /* open_usb_camera()							*/
@@ -104,6 +105,10 @@ int open_usb_camera(void)
 
 	usb_camera.overlay_boxes = TRUE;
 	usb_camera.destripe = TRUE;
+
+	/* We start off with no threshold */
+
+	usb_camera.threshold = 0.0;
 
 	/* How many cameras are there out there? */
 
@@ -524,6 +529,20 @@ void *do_usb_camera(void *arg)
                     {
 			data[i][j] = sum_frame[i][j]/num_sum_frame - dark[i][j];
 			sum_frame[i][j] = 0.0;
+		    }
+		}
+
+		/* Do the thresholding */
+
+		if (usb_camera.threshold > 0.0)
+		{
+                    for(j =1; j <= rectAOI.s32Height; j++)
+                    {
+                        for(i=1; i <= rectAOI.s32Width; i++)
+                        {
+			    if (data[i][j] < usb_camera.threshold)
+			    	data[i][j] = 0.0;
+		        }
 		    }
 		}
 
@@ -1757,11 +1776,45 @@ int create_dark(void)
 {
 	float **dark_increment;
 	int i,j,k;
+	float	mean, mean2;
+	float	min, max;
+	time_t  start;
 
 	dark_increment = matrix(1,cam_info.nMaxWidth, 1, cam_info.nMaxHeight);
 
-	for (i=1;i<=cam_info.nMaxWidth;i++)
-	for (j=1;j<=cam_info.nMaxHeight;j++) dark_increment[i][j]=0.0;
+        for(j =1; j <= rectAOI.s32Height; j++)
+	for(i=1; i <= rectAOI.s32Width; i++) dark_increment[i][j]=0.0;
+
+	/* Should do this with no dark in place. */
+
+	zero_dark();
+
+	/* Wait for the current frame to hit zero */
+
+	send_labao_text_message( "Calculating Dark Frame");
+	message(system_window, "Calculating Dark Frame");
+	start = time(NULL);
+	while (current_data_frame_ix != 0)
+	{
+		if (time(NULL) - start > 3)
+		return error(ERROR,"Timed out wait for dark frames.");
+	}
+
+	/* Let at least one frame go by */
+
+	if (usb_camera.real_fps <= 0.0)
+		usleep(50000);
+	else
+	    usleep(1000000.0/usb_camera.real_fps + 10000);
+
+	/* Wait for it to reach zero again */
+
+	start = time(NULL);
+	while (current_data_frame_ix != 0)
+	{
+		if (time(NULL) - start > 3)
+		return error(ERROR,"Timed out wait for dark frames.");
+	}
 
 	/* Lock the mutex - we don't want half a frame here. */
 
@@ -1771,23 +1824,38 @@ int create_dark(void)
 
 	for (k=0;k<NUM_IMAGE_MEM;k++)
 	{
-		for (i=1;i<=cam_info.nMaxWidth;i++)
-		for (j=1;j<=cam_info.nMaxHeight;j++)
+		for(j =1; j <= rectAOI.s32Height; j++)
+		for(i=1; i <= rectAOI.s32Width; i++) 
 			dark_increment[i][j] += data_frames[k][i][j];
 	}
 
 	/* Now add this to the dark, which was previously subtracted. */
 
-	for (i=1;i<=cam_info.nMaxWidth;i++)
-	for (j=1;j<=cam_info.nMaxHeight;j++)
-		dark[i][j] += dark_increment[i][j]/NUM_IMAGE_MEM;
+	mean = mean2 = 0.0;
+	min = 1e32;
+	max = -1e32;
+	for(j =1; j <= rectAOI.s32Height; j++)
+	for(i=1; i <= rectAOI.s32Width; i++) 
+	{
+		dark[i][j] = dark_increment[i][j]/NUM_IMAGE_MEM;
+                mean += dark[i][j];
+                mean2 += (dark[i][j] * dark[i][j]);
+		if (dark[i][j] < min) min = dark[i][j];
+		if (dark[i][j] > max) max = dark[i][j];
+        }
+        mean /= ((float)(rectAOI.s32Height * rectAOI.s32Width));
+        mean2 /= ((float)(rectAOI.s32Height * rectAOI.s32Width));
+        dark_stddev = sqrt(mean2 - mean * mean);
 
 	/* All done! */
 
 	pthread_mutex_unlock(&usb_camera_mutex);
 	free_matrix(dark_increment,1,cam_info.nMaxWidth,1,cam_info.nMaxHeight);
 
-	send_labao_text_message("Dark Created.");
+	send_labao_text_message( "Dark Created. %.1f - %.1f. Mean = %.1f+-%.2f",
+		min, max, mean, dark_stddev);
+	message(system_window, "Dark Created. %.1f - %.1f. Mean = %.1f+-%.2f",
+		min, max, mean, dark_stddev);
 
 	return NOERROR;
 
@@ -1820,6 +1888,8 @@ int zero_dark(void)
 
 	for (i=1;i<=cam_info.nMaxWidth;i++)
 	for (j=1;j<=cam_info.nMaxHeight;j++) dark[i][j] = 0.0;
+	dark_stddev = 0.0;
+	usb_camera.threshold = 0.0;
 
 	pthread_mutex_unlock(&usb_camera_mutex);
 
@@ -2408,3 +2478,46 @@ int call_set_num_sum_frame(int argc, char **argv)
 	return NOERROR;
 
 } /* call_set_num_sum_frame() */
+
+/************************************************************************/
+/* set_image_threshold()						*/
+/*									*/
+/* Sets image threshold.						*/
+/************************************************************************/
+
+int set_image_threshold(int argc, char **argv)
+{
+	char	s[100];
+	float	num;
+
+	/* Is there a stddev right now? */
+
+	if (dark_stddev <= 0.0)
+		return error(ERROR,"You need to get a dark first.");
+
+	if (argc > 1)
+	{
+		sscanf(argv[1],"%f",&num);
+	}
+	else
+	{
+		clean_command_line();
+		if (usb_camera.threshold > 0.0 && dark_stddev > 0.0)
+			num = usb_camera.threshold/dark_stddev;
+		else
+			num = 3.0;
+
+		sprintf(s,"    %.2f", num);
+		if (quick_edit("Number of Stddev of dark for threshold",
+			s,s,NULL,FLOAT) == KEY_ESC) return NOERROR;
+		sscanf(s,"%f",&num);
+	}
+
+	if (num >= 0.0) usb_camera.threshold = dark_stddev * num;
+
+	send_labao_text_message("Threshold set to %.2f", usb_camera.threshold);
+	message(system_window, "Threshold set to %.2f", usb_camera.threshold);
+
+	return NOERROR;
+
+} /* set_image_threshold() */

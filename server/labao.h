@@ -116,12 +116,14 @@ extern float	ypos_center;
 extern int	pico_server;
 extern char	*pico_servers[NUM_PICO_SERVERS];
 extern int	telescope_server;
+extern int	iris_server;
 extern int	dich_mirror;
 extern struct SMIRROR_LIST mirror_list[];
 extern float servo_memory;
 extern float servo_gain;
 extern float servo_damping;
 extern float servo_integration;
+extern bool iris_at_beam_size;
 
 /* So we know where the telescope is */
 
@@ -139,6 +141,8 @@ void labao_open(void);
 void print_usage_message(char *name);
 int open_pico_connection(int argc, char **argv);
 int open_telescope_connection(int argc, char **argv);
+int message_telescope_status(int server, struct smessage *message);
+int open_iris_connection(int argc, char **argv);
 
 /* labao_background.c */
 
@@ -169,10 +173,10 @@ int message_labao_edac40_add(struct smessage *message);
 int message_labao_set_num_mean(struct smessage *message);
 int message_labao_save_data(struct smessage *message);
 int message_labao_reopen_telescope(struct smessage *message);
-int message_telescope_status(int server, struct smessage *message);
 int message_labao_add_wfs_aberration(struct smessage *message);
 int message_labao_zero_wfs_aberration(struct smessage *message);
 int message_labao_set_fps(struct smessage *message);
+int message_labao_set_threshold(struct smessage *message);
 int message_labao_load_defaults(struct smessage *message);
 int message_labao_save_defaults(struct smessage *message);
 int message_labao_reopen_tiptilt(struct smessage *message);
@@ -263,6 +267,7 @@ int send_labao_set_usb_camera(bool send_to_all_clients);
 bool usb_cammera_is_running(void);
 int set_num_sum_frame(int num);
 int call_set_num_sum_frame(int argc, char **argv);
+int set_image_threshold(int argc, char **argv);
 
 /* labso_fsm.c */
 
@@ -299,6 +304,7 @@ int call_apply_reconstructor(int argc, char **argv);
 int toggle_ignore_tilt(int argc, char **argv);
 int edit_wfs_results_num(int argc, char **argv);
 int start_autoalign_lab_dichroic(int argc, char **argv);
+int message_iris_status(int server, struct smessage *mess);
 int start_autoalign_scope_dichroic(int argc, char **argv);
 int start_autoalign_zernike(int argc, char **argv);
 int stop_autoalign(int argc, char **argv);
@@ -321,6 +327,7 @@ int select_dichroic(int argc, char **argv);
 int message_aob_change_dichroic(struct smessage *message);
 int toggle_coude_dichroic_corrections(int argc, char **argv);
 int edit_coude_dichroic_corrections(int argc, char **argv);
+int edit_dm_impulse(int argc, char **argv);
 
 /* labao_tiptilt_data_socket.c */
 

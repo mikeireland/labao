@@ -121,6 +121,7 @@ void setup_standard_labao_messages(void)
 	ui_add_message_job(LABAO_TOGGLE_REFERENCE, 
                 message_labao_toggle_reference);
 	ui_add_message_job(LABAO_MOVE_BOXES, message_labao_move_boxes);
+	ui_add_message_job(LABAO_SET_THRESHOLD, message_labao_set_threshold);
 
 
 } /* setup_standard_labao_messages() */
@@ -719,7 +720,7 @@ int message_labao_toggle_reference(struct smessage *message)
 } /* message_labao_toggle_reference() */
 
 /************************************************************************/
-/* message_labao_move_boxes()                                  */
+/* message_labao_move_boxes()      	                                */
 /*                                                                      */
 /************************************************************************/
 
@@ -747,3 +748,29 @@ int message_labao_move_boxes(struct smessage *message)
 
 } /* message_labao_move_boxes() */
 
+
+/************************************************************************/
+/* message_labao_set_threshold()      	                                */
+/*                                                                      */
+/************************************************************************/
+
+int message_labao_set_threshold(struct smessage *message)
+{
+	char	*args[1];
+	char	argv1[30];
+	float	*data;
+
+	if (message->length != sizeof(float))
+    		return error(ERROR,
+			"Got LABAO_SET_THRESHOLD with wrong data.");
+
+	data = (float *)message->data;
+
+	sprintf(argv1,"%.4f", *data);
+
+	args[0] = "sthresh";
+	args[1] = argv1;
+
+	return set_image_threshold(2, args);
+
+} /* message_labao_set_threshold() */

@@ -101,6 +101,8 @@ struct {
 		{"exptime",     call_usb_camera_set_exptime},
 		{"tbox",	toggle_overlay_boxes},
 		{"nframe",	call_set_num_sum_frame},
+		{"sthresh",	set_image_threshold},
+		{"thresh",	set_image_threshold},
 
 		/* Function set for finite state machine */
 
@@ -146,6 +148,8 @@ struct {
 		{"dich",	select_dichroic},
 		{"tcdc",        toggle_coude_dichroic_corrections},
                 {"ecdc",        edit_coude_dichroic_corrections},
+                {"eimp",        edit_dm_impulse},
+                {"imp",        	edit_dm_impulse},
 
 		/* Function set for tiptilt messages */
 

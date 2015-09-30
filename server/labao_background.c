@@ -76,10 +76,14 @@ int linux_time_status(void)
 	wprintw(status_window," %02d:%02d:%02d",
 		now->tm_hour,now->tm_min,now->tm_sec);
 
-	/* Do we need to save anything? */
+	/* Process what we need to process */
 
 	process_server_socket(telescope_server);
 	process_server_socket(pico_server);
+	process_server_socket(iris_server);
+
+	/* Do we need to save anything? */
+
 	complete_aberrations_record();
 	complete_fits_cube();
 

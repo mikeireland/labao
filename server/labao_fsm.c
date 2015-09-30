@@ -71,6 +71,11 @@ static float centroid_yw[CENTROID_WINDOW_WIDTH][CENTROID_WINDOW_WIDTH];
                          
 static char *dichroic_types[] = {"GRAY ", "SPARE", "YSO  ", NULL};
 
+#define NUM_ABERRATIONS	9
+static char *aberration_types[NUM_ABERRATIONS+1] = { "NULL", "NULL", 
+	"Tilt X", "Tilt Y", "Focus ", 
+	"Astig1", "Astig2", "Coma 1", "Coma 2", NULL};
+		
 /* Possible centroiding types */
 
 #define CENTROID_WINDOW_ONLY 0
@@ -104,7 +109,6 @@ static float fsm_flat_dm_spare[NUM_ACTUATORS];
 static float fsm_mean_dm[NUM_ACTUATORS];
 static float fsm_calc_mean_dm[NUM_ACTUATORS];
 static float fsm_dm_offset[NUM_ACTUATORS];
-static float fsm_dm_delta[NUM_ACTUATORS];
 static float fsm_dm_sum[NUM_ACTUATORS];
 static float max_dm_sum = SERVO_SUM_MAX;
 static float fsm_dm_last_delta[NUM_ACTUATORS];
@@ -146,6 +150,8 @@ static float coude_dichroic_correction_x_phase = 0.0;
 static float coude_dichroic_correction_y_amp = 0.0;
 static float coude_dichroic_correction_y_phase = 0.0;
 static float last_coude_correction_az = -1.0;
+static float dm_impulse = 0.0;
+static float	mean_dm_error, mean_dm_offset;
 
 /* Globals. */
 
@@ -211,7 +217,6 @@ void initialize_fsm(void)
 		fsm_mean_dm[i]=DM_DEFAULT;
 		fsm_calc_mean_dm[i]=DM_DEFAULT;
 		fsm_dm_offset[i]=0.0;	
-		fsm_dm_delta[i]=0.0;	
 		fsm_dm_sum[i]=0.0;	
 		fsm_dm_last_delta[i]=0.0;	
 	}
@@ -367,7 +372,9 @@ int load_defaults(char* filename_in)
 		x_centroid_offsets_reference[i] = xoff_reference;
 		y_centroid_offsets_reference[i] = yoff_reference;
 	}
+
 	/* Compute the new pupil center and scale. */
+
 	compute_pupil_center();
 
 	/* Load the "flat" wavefront definition */
@@ -826,6 +833,7 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 	float fluxes[NUM_LENSLETS];
 	float new_dm[NUM_ACTUATORS+1];
 	float fsm_dm_error[NUM_ACTUATORS];
+	float fsm_dm_delta[NUM_ACTUATORS];
 	int x,y,dx,dy;
 	bool is_new_actuator=TRUE;
 	float outer_dm_mean = 0.0;
@@ -920,6 +928,101 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 
 	}
 
+	/* 
+ 	 * Add aberration and save the centroids and fluxes to our globals
+ 	 */
+
+	pthread_mutex_lock(&fsm_mutex);
+	for (l=0;l<NUM_LENSLETS;l++)
+	{
+		xc[l] = (new_xc[l] -= aberration_xc[l]);
+		yc[l] = (new_yc[l] -= aberration_yc[l]);
+		avg_fluxes[l] = fluxes[l] *
+				(1-FLUX_DAMPING) + FLUX_DAMPING*avg_fluxes[l];
+	}
+	pthread_mutex_unlock(&fsm_mutex);
+
+	/* Compute the tiptilt, focus, astigmatism, and coma terms */
+
+	for (i=0;i<NUM_LENSLETS;i++)
+	{
+		x_offset = x_centroid_offsets[i] - x_mean_offset;
+		y_offset = y_centroid_offsets[i] - y_mean_offset;
+
+		xtilt += new_xc[i];
+		ytilt += new_yc[i];
+
+		total_flux += avg_fluxes[i];
+
+		/* To compute the pupil position, reference everything
+		to the center of the pupil. */
+
+		xpos += x_offset * avg_fluxes[i];
+		ypos += y_offset * avg_fluxes[i];
+
+#warning This is not normalised correctly. Should give 1 for e.g. peak to valley slopes of 1 arcsec.
+
+		focus += (new_xc[i]*x_offset + new_yc[i]*y_offset);
+		a1 +=    (new_xc[i]*x_offset - new_yc[i]*y_offset);
+		a2 +=    (new_yc[i]*x_offset + new_xc[i]*y_offset);
+		c1 +=  new_xc[i] *
+			(9*x_offset*x_offset + 3*y_offset*y_offset-2)/9.0 + 
+			new_yc[i]*2*x_offset*y_offset/3.0;
+		c2 +=  new_yc[i] *
+			(9*y_offset*y_offset + 3*x_offset*x_offset-2)/9.0 + 
+			new_xc[i]*2*x_offset*y_offset/3.0;
+	}
+	current_total_flux = total_flux;
+
+	/* This is the old method.... */
+
+	/*
+	xtilt /= (NUM_LENSLETS/ARCSEC_PER_PIX);
+	ytilt /= (NUM_LENSLETS/ARCSEC_PER_PIX);
+	focus /= (NUM_LENSLETS/ARCSEC_PER_PIX);
+	a1 /= (NUM_LENSLETS/ARCSEC_PER_PIX);
+	a2 /= (NUM_LENSLETS/ARCSEC_PER_PIX);
+	xpos /= (NUM_LENSLETS/ARCSEC_PER_PIX);
+	ypos /= (NUM_LENSLETS/ARCSEC_PER_PIX);
+	*/
+
+	/* We do it this way so the numbers are the same as for the WFS */
+
+	xtilt /= ((float)NUM_LENSLETS*((float)CENTROID_BOX_WIDTH/2.0));
+	ytilt /= ((float)NUM_LENSLETS*((float)CENTROID_BOX_WIDTH/2.0));
+	focus /= (float)NUM_LENSLETS;
+	a1 /= (float)NUM_LENSLETS;
+	a2 /= (float)NUM_LENSLETS;
+	c1 /= (float)NUM_LENSLETS;
+	c2 /= (float)NUM_LENSLETS;
+	
+	/* Calculate the position.... this doesn't work well */
+
+	if (total_flux > ZERO_CLAMP)
+	{
+		xpos /= total_flux;
+		ypos /= total_flux;
+	}
+	else
+	{
+		xpos = 0.0;
+		ypos = 0.0;
+	}
+
+	/* 
+	 * So that all terms are at least in units of "pixels" 
+	 * (i.e. max tilt per sub-aperture), we divide by the
+	 * radius of the pupil.
+	 */
+
+	focus /= max_offset;
+	a1 /= max_offset;
+	a2 /= max_offset;
+	c1 /= max_offset*max_offset;
+	c2 /= max_offset*max_offset;
+	xpos /= max_offset;
+	ypos /= max_offset;
+
 	/* Reset the integral if needed */
 
 	if (fsm_cyclenum==0)
@@ -936,9 +1039,9 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 
 	for (l=0;l<NUM_LENSLETS;l++)
 	{
-		fsm_xc_int[l]+=new_xc[l];
-		fsm_yc_int[l]+=new_yc[l];
-		avg_fluxes[l]+=fluxes[l];
+		fsm_xc_int[l] += new_xc[l];
+		fsm_yc_int[l] += new_yc[l];
+		avg_fluxes[l] += fluxes[l];
 	}
 
 	/* Lock the mutex */
@@ -972,15 +1075,20 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 			if (y_centroid_offsets[l] >= dy-CLEAR_EDGE)
 				y_centroid_offsets[l] = dy-CLEAR_EDGE;
 		    }
+
 		    /* Compute the new pupil center... */
+
 		    compute_pupil_center();
+
 		    /* Return the fsm to default */
+
 		    fsm_cyclenum=0;
 		    fsm_state = FSM_CENTROIDS_ONLY;
 	  	}
 	  	break;
 	  	
 	case FSM_MEASURE_RECONSTRUCTOR:
+#warning Added Zernike matrix here as well.
 		if (fsm_cyclenum == 0)
 		{
 		    for (i=0;i<NUM_ACTUATORS;i++)
@@ -1082,6 +1190,8 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 
 	case FSM_SERVO_LOOP:
 
+		mean_dm_error = 0.0;
+		mean_dm_offset = 0.0;
 		for (i=0;i<NUM_ACTUATORS;i++)
 		{
  		    /*
@@ -1094,7 +1204,6 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 		    if(fsm_cyclenum == 0)
 		    {
 			fsm_dm_offset[i] = 0.0;
-			fsm_dm_delta[i] = 0.0;
 			fsm_dm_sum[i] = 0.0;
 			fsm_dm_last_delta[i] = 0.0;
 		    }
@@ -1119,14 +1228,16 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 
 		    /* Apply the reconstructor and get the delta for the DM */
 
+		    fsm_dm_error[i] = 0.0;
 		    for (l=0;l<NUM_LENSLETS;l++)
 		    {
-			fsm_dm_error[i] = -1.0 * 
+			fsm_dm_error[i] -= 
 				(fsm_reconstructor[i][l] *
-				(new_xc[l] - xtilt + aberration_xc[l]) +
+				(new_xc[l] - xtilt) +
 				fsm_reconstructor[i][NUM_LENSLETS+l] *
-				(new_yc[l] - ytilt + aberration_yc[l]));
+				(new_yc[l] - ytilt));
 		    }
+		    mean_dm_error += fsm_dm_error[i];
 
 		    /* 
  		     * The most likely wavefront is flat, 
@@ -1139,11 +1250,12 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 		    if (fsm_state == FSM_SERVO_LOOP)
 			fsm_dm_offset[i] *= servo_memory;
 
-		    /* Now apply the servo to the error */
+		    /* Now apply the servo to the error, adding impulse  */
 
 		    fsm_dm_delta[i] = servo_gain * fsm_dm_error[i] -
 			servo_damping * fsm_dm_last_delta[i] +
-			servo_integration * fsm_dm_sum[i];
+			servo_integration * fsm_dm_sum[i] +
+			dm_impulse;
 
 		    /* We will need these for the next round */
 
@@ -1159,48 +1271,53 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 		    /* We now have a final offset form the flat */
 
 		    fsm_dm_offset[i] += fsm_dm_delta[i];
+		    mean_dm_offset += fsm_dm_offset[i];
 
 #ifdef ENFORCE_ZERO_PISTON
 		    if (i >= NUM_INNER_ACTUATORS)
 			outer_dm_mean += fsm_dm_offset[i];
 #endif
 		}
+		mean_dm_error /= ((float)NUM_ACTUATORS);
+		mean_dm_offset /= ((float)NUM_ACTUATORS);
 
+		/* The impulse should only happen once */
 
-		/* Work out avergae on the edge */
+		dm_impulse = 0.0;
+
+		/* Work out average on the edge */
 
 #ifdef ENFORCE_ZERO_PISTON
 		outer_dm_mean /= (NUM_ACTUATORS - NUM_INNER_ACTUATORS);
 #endif
-		/* Add in the flat wavefront and remove piston. */
 
 		for (i=0;i<NUM_ACTUATORS;i++)
 		{
+			/* Add in the flat */
+
 		        new_dm[i+1] = fsm_flat_dm[i] + fsm_dm_offset[i];
 		
 #ifdef ENFORCE_ZERO_PISTON
+			/* Remove any piston */
+
 			if (i >= NUM_INNER_ACTUATORS)
 				new_dm[i+1] -= outer_dm_mean;
 #endif
-		}
+			/* Limit positions to the range 0 to 1 */
 
-	        /* Limit positions to the range 0 to 1 */
+	            	if (new_dm[i+1] > 1)
+		    	{
+				if (fsm_state != FSM_APPLY_RECON_ONCE)
+				 	fsm_dm_offset[i] -= new_dm[i+1]-1;
+				new_dm[i+1] = 1.0;
+		    	}
 
-		for (i=0;i<NUM_ACTUATORS;i++)
-                {
-	            if (new_dm[i+1] > 1)
-		    {
-			if (fsm_state != FSM_APPLY_RECON_ONCE)
-			 	fsm_dm_offset[i] -= new_dm[i+1]-1;
-			new_dm[i+1] = 1.0;
-		    }
-
-		    if (new_dm[i+1] < 0)
-		    {
-			if (fsm_state != FSM_APPLY_RECON_ONCE)
-			 	fsm_dm_offset[i] -= new_dm[i+1];
-			new_dm[i+1] = 0.0;
-		    }
+		    	if (new_dm[i+1] < 0)
+		    	{
+				if (fsm_state != FSM_APPLY_RECON_ONCE)
+			 		fsm_dm_offset[i] -= new_dm[i+1];
+				new_dm[i+1] = 0.0;
+		    	}
 		}
 
 		/* Send off the DM command! */
@@ -1225,75 +1342,14 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 			"We should never reach this point in the switch");
 	}
 
-	/* 
- 	 * Done with fancy servoing etc. 
- 	 * Save the centroids and fluxes to our globals
- 	 */
-
-	for (l=0;l<NUM_LENSLETS;l++)
-	{
-		xc[l] = new_xc[l];
-		yc[l] = new_yc[l];
-		avg_fluxes[l] = fluxes[l] *
-				(1-FLUX_DAMPING) + FLUX_DAMPING*avg_fluxes[l];
-	}
-
 	/* OK, next cycle */
 
 	fsm_cyclenum++;
 
-	/* Compute the tiptilt, focus and astigmatism terms */
+	/* Unlock the Mutex */
+ 
+	pthread_mutex_unlock(&fsm_mutex);
 
-	for (i=0;i<NUM_LENSLETS;i++)
-	{
-		x_offset = x_centroid_offsets[i] - x_mean_offset;
-		y_offset = y_centroid_offsets[i] - y_mean_offset;
-
-		xtilt += xc[i];
-		ytilt += yc[i];
-
-		total_flux += avg_fluxes[i];
-
-		/* To compute the pupil position, reference everything
-		to the center of the pupil. */
-
-		xpos += x_offset * avg_fluxes[i];
-		ypos += y_offset * avg_fluxes[i];
-
-#warning This is not normalised correctly. Should give 1 for e.g. peak to valley slopes of 1 arcsec.
-
-		focus += (xc[i]*x_offset + yc[i]*y_offset);
-		a1 +=    (xc[i]*x_offset - yc[i]*y_offset);
-		a2 +=    (yc[i]*x_offset + xc[i]*y_offset);
-		c1 +=  xc[i]*(9*x_offset*x_offset + 3*y_offset*y_offset-2)/9.0 + 
-			yc[i]*2*x_offset*y_offset/3.0;
-		c2 +=  yc[i]*(9*y_offset*y_offset + 3*x_offset*x_offset-2)/9.0 + 
-			xc[i]*2*x_offset*y_offset/3.0;
-	}
-	current_total_flux = total_flux;
-
-	/* This is the old method.... */
-
-	/*
-	xtilt /= (NUM_LENSLETS/ARCSEC_PER_PIX);
-	ytilt /= (NUM_LENSLETS/ARCSEC_PER_PIX);
-	focus /= (NUM_LENSLETS/ARCSEC_PER_PIX);
-	a1 /= (NUM_LENSLETS/ARCSEC_PER_PIX);
-	a2 /= (NUM_LENSLETS/ARCSEC_PER_PIX);
-	xpos /= (NUM_LENSLETS/ARCSEC_PER_PIX);
-	ypos /= (NUM_LENSLETS/ARCSEC_PER_PIX);
-	*/
-
-	/* We do it this way so the numbers are the same as for the WFS */
-
-	xtilt /= ((float)NUM_LENSLETS*((float)CENTROID_BOX_WIDTH/2.0));
-	ytilt /= ((float)NUM_LENSLETS*((float)CENTROID_BOX_WIDTH/2.0));
-	focus /= (float)NUM_LENSLETS;
-	a1 /= (float)NUM_LENSLETS;
-	a2 /= (float)NUM_LENSLETS;
-	c1 /= (float)NUM_LENSLETS;
-	c2 /= (float)NUM_LENSLETS;
-	
 	/* And now we send the tiptilt away */
 
 	theta = M_PI*(telescope_status.az - 65.5)/180.0;
@@ -1303,33 +1359,6 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 	ywfs = xtilt * sintheta - ytilt * costheta;
 
 	send_labao_tiptilt_data(xwfs, ywfs);
-
-	/* Calculate the position.... this doesn't work well */
-
-	if (total_flux > ZERO_CLAMP)
-	{
-		xpos /= total_flux;
-		ypos /= total_flux;
-	}
-	else
-	{
-		xpos = 0.0;
-		ypos = 0.0;
-	}
-
-	/* 
-	 * So that all terms are at least in units of "pixels" 
-	 * (i.e. max tilt per sub-aperture), we divide by the
-	 * radius of the pupil.
-	 */
-
-	focus /= max_offset;
-	a1 /= max_offset;
-	a2 /= max_offset;
-	c1 /= max_offset*max_offset;
-	c2 /= max_offset*max_offset;
-	xpos /= max_offset;
-	ypos /= max_offset;
 
 	/* Are we saving the aberrations for a report? */
 
@@ -1416,10 +1445,6 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 
 		new_aberrations = TRUE;
 	}
-
-	/* Unlock the Mutex */
- 
-	pthread_mutex_unlock(&fsm_mutex);
 
 } /* run_centroids_and_fsm() */
 
@@ -1733,6 +1758,7 @@ int fsm_status(void)
 					"Giving up on lab autoalignment.");
 				send_labao_text_message("%s",
 					"Giving up on lab autoalignment.");
+				use_reference_off();
 				pthread_mutex_unlock(&fsm_mutex);
 				return NOERROR;
 			}
@@ -1869,23 +1895,29 @@ int fsm_status(void)
 		    {
 			if (x > SCOPE_ALIGN_LIMIT)
 			{
-			      motor_move.motor = AOB_DICHR_2;
-			      motor_move.position = SCOPE_ALIGN_STEP + 
+			    if (this_labao == S2)
+			          motor_move.motor = AOB_S2_DICHR_2;
+			    else
+			          motor_move.motor = AOB_DICHR_2;
+			    motor_move.position = SCOPE_ALIGN_STEP + 
 				(int)(fabs(x)*SCOPE_ALIGN_GAIN);
-			      autoalign_x_total += SCOPE_ALIGN_STEP + 
+			    autoalign_x_total += SCOPE_ALIGN_STEP + 
 				(int)(fabs(x)*SCOPE_ALIGN_GAIN);
-			      send_message(telescope_server, &mess);
-			      strcat(s," Moving RIGHT");
+			    send_message(telescope_server, &mess);
+			    strcat(s," Moving RIGHT");
 			}
 			else if (x < -1.0*SCOPE_ALIGN_LIMIT)
 			{
-			      motor_move.motor = AOB_DICHR_2;
-			      motor_move.position = -1.0*(SCOPE_ALIGN_STEP  + 
+			    if (this_labao == S2)
+			          motor_move.motor = AOB_S2_DICHR_2;
+			    else
+			          motor_move.motor = AOB_DICHR_2;
+			    motor_move.position = -1.0*(SCOPE_ALIGN_STEP  + 
 				(int)(fabs(x)*SCOPE_ALIGN_GAIN));
-			      autoalign_x_total -= SCOPE_ALIGN_STEP  + 
+			    autoalign_x_total -= SCOPE_ALIGN_STEP  + 
 				(int)(fabs(x)*SCOPE_ALIGN_GAIN);
-			      send_message(telescope_server, &mess);
-			      strcat(s," Moving LEFT");
+			    send_message(telescope_server, &mess);
+			    strcat(s," Moving LEFT");
 			}
 			else
 			{
@@ -1896,7 +1928,10 @@ int fsm_status(void)
 		    {
 			if (y > SCOPE_ALIGN_LIMIT)
 			{
-			    motor_move.motor = AOB_DICHR_1;
+			    if (this_labao == S2)
+			        motor_move.motor = AOB_S2_DICHR_1;
+			    else
+			        motor_move.motor = AOB_DICHR_1;
 			    motor_move.position = SCOPE_ALIGN_STEP + 
 				(int)(fabs(y)*SCOPE_ALIGN_GAIN);
 			    autoalign_y_total += SCOPE_ALIGN_STEP + 
@@ -1906,7 +1941,10 @@ int fsm_status(void)
 			}
 			else if (y < -1.0 * SCOPE_ALIGN_LIMIT)
 			{
-			    motor_move.motor = AOB_DICHR_1;
+			    if (this_labao == S2)
+			        motor_move.motor = AOB_S2_DICHR_1;
+			    else
+			        motor_move.motor = AOB_DICHR_1;
 			    motor_move.position = -1.0*(SCOPE_ALIGN_STEP + 
 				(int)(fabs(y)*SCOPE_ALIGN_GAIN));
 			    autoalign_y_total -= SCOPE_ALIGN_STEP + 
@@ -2042,10 +2080,22 @@ int fsm_status(void)
 		wprintw(status_window, "%6.3f %6.3f", 
 			wfs_results.a1, wfs_results.a2);
 		wstandout(status_window);
-		mvwaddstr(status_window,8,41,"Coma   : ");
+		mvwaddstr(status_window,8,44,"Coma   : ");
 		wstandend(status_window);
 		wprintw(status_window, "%6.3f %6.3f", 
 			wfs_results.c1, wfs_results.c2);
+	
+		/* These to help us learn about the servo */
+
+		wstandout(status_window);
+		mvwaddstr(status_window,0,44,"Error  : ");
+		wstandend(status_window);
+		wprintw(status_window, "%6.3f", mean_dm_error);
+	
+		wstandout(status_window);
+		mvwaddstr(status_window,1,44,"Offset : ");
+		wstandend(status_window);
+		wprintw(status_window, "%6.3f", mean_dm_offset);
 	
 	}
 
@@ -2382,7 +2432,6 @@ int start_scope_dichroic_mapping(int argc, char **argv)
 	return NOERROR;
 }
 
-
 /************************************************************************/
 /* start_autoalign_lab_dichroic()					*/
 /*									*/
@@ -2392,6 +2441,8 @@ int start_scope_dichroic_mapping(int argc, char **argv)
 int start_autoalign_lab_dichroic(int argc, char **argv)
 {
         char    s[100];
+	struct smessage mess;
+	time_t	start;
 
 	if (autoalign_scope_dichroic || autoalign_zernike)
 		return error(ERROR,"Already running Auto Alignment.");
@@ -2411,13 +2462,17 @@ int start_autoalign_lab_dichroic(int argc, char **argv)
                 sscanf(s,"%d",&autoalign_count);
         }
 
-	/* First, let's make sure the pico connection is there */
+	/* First, let's make sure the pico and iris connections ares there */
 
 #warning This stops the PICO server If it is switched off.
 	
 	if (pico_server != -1) close_server_socket(pico_server);
 
 	if (open_pico_connection(0, NULL) != NOERROR) return ERROR;
+
+	if (iris_server != -1) close_server_socket(iris_server);
+
+	if (open_iris_connection(0, NULL) != NOERROR) return ERROR;
 
 	message(system_window,"Lab autoalignment begins Trys = %d",
 		autoalign_count);
@@ -2431,6 +2486,44 @@ int start_autoalign_lab_dichroic(int argc, char **argv)
 	/* We need the reference offsets */
 
 	use_reference_on();
+
+	/* We must ensure the iris is at beam size */
+
+	if (!iris_at_beam_size)
+	{
+	    mess.type = IRIS_COMMAND_BEAM;
+	    mess.data = NULL;
+	    mess.length = 0;
+	
+            if (!send_message(iris_server, &mess))
+	    {
+		iris_server = -1;
+	    }
+	    else
+	    {
+		start = time(NULL);
+
+		while (!iris_at_beam_size)
+		{
+		    process_server_socket(iris_server);
+		    message(system_window,
+			"Waiting for Iris to go to beam size %d.",
+			15 + (int)(start - time(NULL)));
+		    send_labao_text_message(
+			"Waiting for Iris to go to beam size %d.",
+			15 + (int)(start - time(NULL)));
+    
+    		    if (time(NULL) > start+15)
+		    {
+			error(ERROR,"Timed out waiting for IRIS.");
+			break;
+		    }
+		}
+
+		werase(system_window);
+		wrefresh(system_window);
+	    }
+	}
 
 	/* Go */
 
@@ -2480,7 +2573,10 @@ int start_autoalign_scope_dichroic(int argc, char **argv)
                 mess.length = sizeof(motor_move);
                 mess.data = (unsigned char *)&motor_move;
 
-                motor_move.motor = AOB_DICHR_2;
+	        if (this_labao == S2)
+                    motor_move.motor = AOB_S2_DICHR_2;
+	        else
+                    motor_move.motor = AOB_DICHR_2;
                 motor_move.position =
                         coude_dichroic_correction_x_amp * (
                         sin((telescope_status.az  +
@@ -2493,7 +2589,10 @@ int start_autoalign_scope_dichroic(int argc, char **argv)
 
                 sleep(1);
 
-                motor_move.motor = AOB_DICHR_1;
+	        if (this_labao == S2)
+                    motor_move.motor = AOB_S2_DICHR_1;
+		else
+                    motor_move.motor = AOB_DICHR_1;
                 motor_move.position =
                         coude_dichroic_correction_y_amp * (
                         sin((telescope_status.az  +
@@ -2591,49 +2690,20 @@ int stop_autoalign(int argc, char **argv)
 
 int edit_servo_parameters(int argc, char **argv)
 {
-        char    s[100]; float	gain, memory, damping;
+        char    s[100];
+	float	memory, gain, damping, integration, max_sum;
 
         /* Check out the command line */
 
+	memory = servo_memory;
 	gain = servo_gain;
 	damping = servo_damping;
-	memory = servo_memory;
+	integration = servo_integration;
+	max_sum = max_dm_sum;
 
         if (argc > 1)
         {
-                sscanf(argv[1],"%f",&gain);
-        }
-        else
-        {
-                clean_command_line();
-                sprintf(s,"%9.2f", gain);
-                if (quick_edit("Servo Gain",s,s,NULL,FLOAT)
-                   == KEY_ESC) return NOERROR;
-                sscanf(s,"%f",&gain);
-        }
-
-	if (gain < 0.0 || gain > 2.0) return 
-		error(ERROR,"Gain must be between 0 and 2.");
-
-        if (argc > 2)
-        {
-                sscanf(argv[2],"%f",&damping);
-        }
-        else
-        {
-                clean_command_line();
-                sprintf(s,"%9.2f", damping);
-                if (quick_edit("Servo Memory",s,s,NULL,FLOAT)
-                   == KEY_ESC) return NOERROR;
-                sscanf(s,"%f",&damping);
-        }
-
-	if (damping < 0.0 || damping > 1.0) return 
-		error(ERROR,"Damping must be between 0 and 1.");
-
-        if (argc > 3)
-        {
-                sscanf(argv[3],"%f",&memory);
+                sscanf(argv[1],"%f",&memory);
         }
         else
         {
@@ -2647,9 +2717,75 @@ int edit_servo_parameters(int argc, char **argv)
 	if (memory < 0.0 || memory > 1.0) return 
 		error(ERROR,"Memory must be between 0 and 1.");
 
+        if (argc > 2)
+        {
+                sscanf(argv[2],"%f",&gain);
+        }
+        else
+        {
+                clean_command_line();
+                sprintf(s,"%9.2f", gain);
+                if (quick_edit("Servo Gain",s,s,NULL,FLOAT)
+                   == KEY_ESC) return NOERROR;
+                sscanf(s,"%f",&gain);
+        }
+
+	if (gain < 0.0 || gain > 2.0) return 
+		error(ERROR,"Gain must be between 0 and 2.");
+
+        if (argc > 3)
+        {
+                sscanf(argv[3],"%f",&damping);
+        }
+        else
+        {
+                clean_command_line();
+                sprintf(s,"%9.2f", damping);
+                if (quick_edit("Servo Damping",s,s,NULL,FLOAT)
+                   == KEY_ESC) return NOERROR;
+                sscanf(s,"%f",&damping);
+        }
+
+	if (damping < 0.0 || damping > 1.0) return 
+		error(ERROR,"Damping must be between 0 and 1.");
+
+        if (argc > 4)
+        {
+                sscanf(argv[4],"%f",&integration);
+        }
+        else
+        {
+                clean_command_line();
+                sprintf(s,"%9.2f", integration);
+                if (quick_edit("Servo Integration",s,s,NULL,FLOAT)
+                   == KEY_ESC) return NOERROR;
+                sscanf(s,"%f",&integration);
+        }
+
+	if (integration < 0.0 || integration > 1.0) return 
+		error(ERROR,"Integration must be between 0 and 1.");
+
+        if (argc > 5)
+        {
+                sscanf(argv[5],"%f",&max_sum);
+        }
+        else
+        {
+                clean_command_line();
+                sprintf(s,"%9.2f", max_sum);
+                if (quick_edit("Maximum DM Sum",s,s,NULL,FLOAT)
+                   == KEY_ESC) return NOERROR;
+                sscanf(s,"%f",&max_sum);
+        }
+
+	if (max_sum < 0.0) return 
+		error(ERROR,"Maximum DM sum must be greater than 0.");
+
 	servo_gain = gain;
 	servo_damping = damping;
 	servo_memory = memory;
+	servo_integration = integration;
+	max_dm_sum = max_sum;
 
 	return NOERROR;
 
@@ -2974,10 +3110,10 @@ int call_add_wfs_aberration(int argc, char **argv)
         else
         {
                 clean_command_line();
-                sprintf(s,"%9d", 1);
-                if (quick_edit("Zernike term to change",s,s,NULL,INTEGER)
-                   == KEY_ESC) return NOERROR;
-                sscanf(s,"%d",&zernike);
+		zernike = 4;
+                if (quick_edit("Zernike Term",aberration_types[zernike],
+                        &zernike,aberration_types,ENUMERATED) == KEY_ESC)
+                                return NOERROR;
         }
 
         if (argc > 2)
@@ -3014,8 +3150,8 @@ int add_wfs_aberration(int zernike, float amplitude)
 	{
 	    case 0:
 	    case 1:
-			return error(ERROR, 
-			   "WFS can't measure piston. zernikes start at 2");	
+			return NOERROR;
+
 	    case 2:
 		for (i=0;i<NUM_LENSLETS;i++)
 		{
@@ -3031,50 +3167,52 @@ int add_wfs_aberration(int zernike, float amplitude)
 		break;
 
 	    case 4: /* Focus */
+		amplitude /= 0.773;
 		for (i=0;i<NUM_LENSLETS;i++)
 		{
-		    /* The 0.778 ensures we get the right amount */
-
 		    aberration_xc[i] += amplitude *
 			(x_centroid_offsets[i] - x_mean_offset)/
-				(0.778*max_offset);
+				max_offset;
 		    aberration_yc[i] += amplitude *
 			(y_centroid_offsets[i] - y_mean_offset)/
-				(0.778*max_offset);
+				max_offset;
 		}
 		break;
 
 	    case 5: /* a1 (first astigmatism) term */
-			for (i=0;i<NUM_LENSLETS;i++)
+		amplitude /= 0.773;
+		for (i=0;i<NUM_LENSLETS;i++)
 		{
 		    aberration_xc[i] += amplitude *
 			(x_centroid_offsets[i] - x_mean_offset)/
-				(0.778*max_offset);
+				max_offset;
 		    aberration_yc[i] -= amplitude *
 			(y_centroid_offsets[i] - y_mean_offset)/
-				(0.778*max_offset);
+				max_offset;
 		}
 		break;
 
 	    case 6: /* a2 (second astigmatism) term */
+		amplitude /= 0.773;
 		for (i=0;i<NUM_LENSLETS;i++)
 		{
 		    aberration_xc[i] += amplitude *
 			(y_centroid_offsets[i] - y_mean_offset)/
-				(0.778*max_offset);
+				max_offset;
 		    aberration_yc[i] += amplitude *
 			(x_centroid_offsets[i] - x_mean_offset)/
-				(0.778*max_offset);
+				max_offset;
 		}
 		break;
 
 	    case 7: /* c1 (first coma) term */
+		amplitude /= 0.310;
 		for (i=0;i<NUM_LENSLETS;i++)
 		{
 		    xx = (x_centroid_offsets[i] - x_mean_offset)/
-				(0.778*max_offset);
+				max_offset;
 		    yy = (y_centroid_offsets[i] - y_mean_offset)/
-				(0.778*max_offset);
+				max_offset;
 		    aberration_xc[i] += amplitude *
 			(9*xx*xx + 3*yy*yy - 2)/9.0;
 		    aberration_yc[i] += amplitude *
@@ -3084,12 +3222,13 @@ int add_wfs_aberration(int zernike, float amplitude)
 
 	    
 	    case 8: /* c2 (second coma) term */
+		amplitude /= 0.310;
 		for (i=0;i<NUM_LENSLETS;i++)
 		{
 		    xx = (x_centroid_offsets[i] - x_mean_offset)/
-				(0.778*max_offset);
+				max_offset;
 		    yy = (y_centroid_offsets[i] - y_mean_offset)/
-				(0.778*max_offset);
+				max_offset;
 		    aberration_xc[i] += amplitude *
 			2*xx*yy/3.0;
 		    aberration_yc[i] += amplitude *
@@ -3098,8 +3237,7 @@ int add_wfs_aberration(int zernike, float amplitude)
 		break;
 
 	    default:
-			return error(ERROR, "Zernike term out of range!");		
-
+			return error(ERROR, "Zernike term out of range!");	
 	}
 
 	message(system_window, 
@@ -3371,3 +3509,40 @@ int edit_coude_dichroic_corrections(int argc, char **argv)
 	return NOERROR;
 
 } /* edit_coude_dichroic_corrections() */
+
+/************************************************************************/
+/* edit_dm_impulse()							*/
+/*									*/
+/* Let's you add a single impules to the DM for servo tuning.		*/
+/************************************************************************/
+
+int edit_dm_impulse(int argc, char **argv)
+{
+        char    s[100];
+	float	new_impulse;
+
+        /* Check out the command line */
+
+        if (argc > 1)
+        {
+                sscanf(argv[1],"%f",&new_impulse);
+        }
+        else
+        {
+                clean_command_line();
+                sprintf(s,"      0.05");
+                if (quick_edit("DM Impulse amplitude",s,s,NULL,FLOAT)
+                   == KEY_ESC) return NOERROR;
+                sscanf(s,"%f",&new_impulse);
+        }
+
+	if (new_impulse < 0.0 || new_impulse > 1.0)
+		return error(ERROR,"Impulse must be between 0 and 1.");
+
+	pthread_mutex_lock(&fsm_mutex);
+	dm_impulse = new_impulse;
+	pthread_mutex_unlock(&fsm_mutex);
+
+	return NOERROR;
+
+} /* edit_dm_impulse() */

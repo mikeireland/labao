@@ -117,6 +117,7 @@ int message_labao_set_usb_camera(int server, struct smessage *mess)
                 return NOERROR;
         }
 
+
 	usb_camera = *((struct s_labao_usb_camera *)mess->data);
 
 #warning Place holder
