@@ -51,7 +51,6 @@
 
 /* Centroid calculation number */
 
-#define CENTROID_WINDOW_WIDTH 5
 #define CENTROID_HW (CENTROID_WINDOW_WIDTH/2)
 #define CLEAR_EDGE ((CENTROID_BOX_WIDTH/2) + (CENTROID_WINDOW_WIDTH/2))
 #warning WE NEED TO THINK ABOUT THESE NUMBERS
@@ -97,12 +96,10 @@ static char *aberration_types[NUM_ABERRATIONS+1] = { "NULL", "NULL",
 
 static int fsm_centroid_type=CENTROID_NONLINEAR;
 static int fsm_ignore_tilt=TRUE;
-static float fsm_reconstructor[NUM_ACTUATORS][2*NUM_LENSLETS];
-static float fsm_actuator_to_sensor[NUM_ACTUATORS][2*NUM_LENSLETS];
+static float fsm_actuator_to_aberration[NUM_ACTUATORS][NUM_ABERRATIONS];
 static float fsm_xc_int[NUM_LENSLETS];
 static float fsm_yc_int[NUM_LENSLETS];
 static int fsm_cyclenum=0;
-static float *fsm_flat_dm;
 static float fsm_flat_dm_yso[NUM_ACTUATORS];
 static float fsm_flat_dm_gray[NUM_ACTUATORS];
 static float fsm_flat_dm_spare[NUM_ACTUATORS];
@@ -139,7 +136,6 @@ static bool new_aberrations = FALSE;
 static int aberrations_record_num = 0;
 static int aberrations_record_count = 0;
 static struct s_labao_wfs_results aberrations_record[MAX_ABERRATIONS_RECORD];
-static float x_mean_offset=0.0, y_mean_offset=0.0, max_offset=1.0;
 static float aberration_xc[NUM_LENSLETS];
 static float aberration_yc[NUM_LENSLETS];
 static bool use_reference = FALSE;
@@ -152,11 +148,12 @@ static float coude_dichroic_correction_y_phase = 0.0;
 static float last_coude_correction_az = -1.0;
 static float dm_impulse = 0.0;
 static float	mean_dm_error, mean_dm_offset;
+static int current_dichroic = AOB_DICHROIC_SPARE;
+static struct s_labao_wfs_results calc_labao_results;
 
 /* Globals. */
 
 int fsm_state = FSM_CENTROIDS_ONLY;
-int current_dichroic = AOB_DICHROIC_SPARE;
 float x_centroid_offsets_beacon[NUM_LENSLETS];
 float y_centroid_offsets_beacon[NUM_LENSLETS];
 float x_centroid_offsets_reference[NUM_LENSLETS];
@@ -167,7 +164,11 @@ float xc[NUM_LENSLETS];
 float yc[NUM_LENSLETS];
 float avg_fluxes[NUM_LENSLETS];
 struct s_labao_wfs_results wfs_results;
-struct s_labao_wfs_results calc_labao_results;
+float fsm_reconstructor[NUM_ACTUATORS][2*NUM_LENSLETS];
+float zernike_reconstructor[NUM_ACTUATORS][2*NUM_LENSLETS];
+float fsm_actuator_to_sensor[NUM_ACTUATORS][2*NUM_LENSLETS];
+float x_mean_offset=0.0, y_mean_offset=0.0, max_offset=1.0, min_doffset = 0.0;
+float *fsm_flat_dm;
 
 /************************************************************************/
 /* initialize_fsm()							*/
@@ -203,11 +204,16 @@ void initialize_fsm(void)
 	wfs_results_n = 0;
 
 	for (i=0; i<NUM_ACTUATORS; i++)
-	for (j=0; j<2*NUM_LENSLETS; j++)
 	{
-		fsm_reconstructor[i][j]=0.0;
+	    for (j=0; j<2*NUM_LENSLETS; j++)
+	    {
+		fsm_reconstructor[i][j]=0.0; 
 		fsm_actuator_to_sensor[i][j]=0.0;
+	    }
+	    for (j=0; j<NUM_ABERRATIONS; j++)
+		fsm_actuator_to_aberration[i][j]=0.0;
 	}
+		
 
 	for (i=0;i<NUM_ACTUATORS;i++)
 	{
@@ -252,15 +258,18 @@ void initialize_fsm(void)
 /* compute_pupil_center()                                               */
 /*                                                                      */
 /* Compute the pupil center and scale directly from the centroid        */
-/* offsets. Should be called wheneve rcentroid offsets are changed.     */
+/* offsets. Should be called whenever centroid offsets are changed.     */
 /************************************************************************/
 
 void compute_pupil_center(void)
 {
 	int i;
-	float x_offset, y_offset;
+	float x_offset, y_offset, offset;
+
+	pthread_mutex_lock(&fsm_mutex);
 
 	/* Initialize variables */
+
 	x_mean_offset = 0.0;
 	y_mean_offset = 0.0;
 	max_offset = 1.0;
@@ -281,10 +290,33 @@ void compute_pupil_center(void)
 	{
 		x_offset = x_centroid_offsets[i] - x_mean_offset;
 		y_offset = y_centroid_offsets[i] - y_mean_offset;
+		offset = sqrt(x_offset*x_offset + y_offset*y_offset);
 
-		if (fabs(x_offset) > max_offset) max_offset = fabs(x_offset);
-		if (fabs(y_offset) > max_offset) max_offset = fabs(y_offset);
+#warning Talk to MIKE about this
+		//if (fabs(x_offset) > max_offset) max_offset = fabs(x_offset);
+		//if (fabs(y_offset) > max_offset) max_offset = fabs(y_offset);
+		if (offset > max_offset) max_offset = offset;
 	}
+
+	/* Find the minimum separration between subapertures */
+
+	min_doffset = 1e32;
+	for(i=0; i<NUM_LENSLETS-1; i++)
+	{
+	    for(j=1; j<NUM_LENSLETS; j++)
+	    {
+		x_offset = x_centroid_offsets[i] - x_centroid_offsets[j];
+		y_offset = y_centroid_offsets[i] - y_centroid_offsets[j];
+		offset = sqrt(x_offset*x_offset + y_offset*y_offset);
+		if (offset < min_doffset) min_doffset = offset;
+	    }
+	}
+
+	/* This will change the Rho and Theta of these subapertures */
+
+	compute_centroid_offset_rho_theta();
+
+	pthread_mutex_unlock(&fsm_mutex);
 
 } /* compute_pupil_center() */
 
@@ -767,14 +799,14 @@ int save_actuator_to_sensor(char* filename_in)
   
   	if ((params_file = fopen(filename,"w")) == NULL ) return -1;
 
-  	/* Get the current AOI and save this */
+  	/* Save the current matrix */
 
 	fprintf(params_file, "# Actuator to sensor matrix %s\n", labao_name);
 	fprintf(params_file, "# One line of sensor movement per actuator \n");
 	for (i=0;i<NUM_ACTUATORS;i++)
 	{
 		for (j=0;j<2*NUM_LENSLETS;j++)
-			fprintf(params_file, "%6.2f ", 
+			fprintf(params_file, "%10.3e ", 
 				fsm_actuator_to_sensor[i][j]);
 		fprintf(params_file, "\n");
 	}
@@ -815,6 +847,81 @@ int call_save_actuator_to_sensor(int argc, char **argv)
 
 }	/* call_save_actuator_to_sensor() */
 
+/************************************************************************/
+/* save_actuator_to_aberration()					*/
+/*									*/
+/* Save the actuator to aberration matrix, used to create the 		*/
+/* reconstructor 							*/ 
+/************************************************************************/
+
+int save_actuator_to_aberration(char* filename_in)
+{
+	char filename[256], s[256];
+	FILE *params_file;
+	int i,j;
+
+	if (filename_in != NULL)
+	{
+ 		strcpy(filename, filename_in);
+	}
+	else
+	{
+		sprintf(filename,"%s%s_actuator_to_aberration.dat", 
+			get_data_directory(s), labao_name);
+        }
+
+  	/* Start with the defaults, in case there is a problem loading */
+  
+  	if ((params_file = fopen(filename,"w")) == NULL ) return -1;
+
+  	/* Save the current matrix and save this */
+
+	fprintf(params_file, "# Actuator to aberration matrix %s\n", 
+		labao_name);
+	fprintf(params_file,"# One line of aberration movement per actuator\n");
+	for (i=0;i<NUM_ACTUATORS;i++)
+	{
+		for (j=0;j<NUM_ABERRATIONS;j++)
+			fprintf(params_file, "%10.3e ", 
+				fsm_actuator_to_aberration[i][j]);
+		fprintf(params_file, "\n");
+	}
+
+	/* That is all. */
+
+	fclose(params_file);
+
+	return 0;
+	
+} /* save_actuator_to_aberration() */
+
+/************************************************************************/
+/* call_save_actuator_to_aberration()					*/
+/*									*/
+/* User callable version of save_actuator_to_aberration.		*/
+/************************************************************************/
+
+int call_save_actuator_to_aberration(int argc, char **argv)
+{
+	if (argc > 1)
+	{
+		if (save_actuator_to_aberration(argv[1])) 
+			return error (ERROR,
+				"Error saving actuator to aberration matrix.");
+	}
+	else 
+	{
+		if (save_actuator_to_aberration(NULL)) 
+			return error (ERROR,
+				"Error saving actuator to aberration matrix.");
+	}
+
+	message(system_window, "Acuator to aberration matrix succesfully saved!");
+	send_labao_text_message("Acuator to aberration matrix succesfully saved!");
+
+	return NOERROR;
+
+}	/* call_save_actuator_to_aberration() */
 
 /************************************************************************/
 /* run_centroids_and_fsm()						*/
@@ -1092,10 +1199,14 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 		if (fsm_cyclenum == 0)
 		{
 		    for (i=0;i<NUM_ACTUATORS;i++)
-		    for (l=0;l<NUM_LENSLETS;l++)
 		    {
-		    	fsm_actuator_to_sensor[i][l] = 0.0;
-		    	fsm_actuator_to_sensor[i][NUM_LENSLETS + l] = 0.0;
+		        for (l=0;l<NUM_LENSLETS;l++)
+		        {
+		    	    fsm_actuator_to_sensor[i][l] = 0.0;
+		    	    fsm_actuator_to_sensor[i][NUM_LENSLETS + l] = 0.0;
+		        }
+		        for (l=0;l<NUM_ABERRATIONS;l++)
+		    	    fsm_actuator_to_aberration[i][l] = 0.0;
 		    }
 	  	}
 	  	    
@@ -1157,9 +1268,14 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 					(NUM_RECON_WAIT + NUM_RECON_AVG))
 		{
 		    for (i=0;i<NUM_ACTUATORS;i++)
-		    for (l=0;l<2*NUM_LENSLETS;l++) 
-			fsm_actuator_to_sensor[i][l] /=
-			(2*ACTUATOR_POKE*NUM_RECON_AVG*NUM_RECON_CYCLES);
+		    {
+		    	for (l=0;l<2*NUM_LENSLETS;l++) 
+			    fsm_actuator_to_sensor[i][l] /=
+			    (2*ACTUATOR_POKE*NUM_RECON_AVG*NUM_RECON_CYCLES);
+		        for (l=0;l<NUM_ABERRATIONS;l++)
+		    	    fsm_actuator_to_aberration[i][l] /= 
+			    (2*ACTUATOR_POKE*NUM_RECON_AVG*NUM_RECON_CYCLES);
+		    }
 		    fsm_state = FSM_CENTROIDS_ONLY;
 		    fsm_cyclenum = 0;
 		    actuator = 1;
@@ -1180,6 +1296,15 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 			fsm_actuator_to_sensor[actuator-1][NUM_LENSLETS + l] +=
 				poke_sign*new_yc[l];
 		    }
+		    fsm_actuator_to_aberration[actuator-1][0] += 0;
+		    fsm_actuator_to_aberration[actuator-1][1] += 0;
+		    fsm_actuator_to_aberration[actuator-1][2] += xtilt;
+		    fsm_actuator_to_aberration[actuator-1][3] += ytilt;
+		    fsm_actuator_to_aberration[actuator-1][4] += focus;
+		    fsm_actuator_to_aberration[actuator-1][5] += a1;
+		    fsm_actuator_to_aberration[actuator-1][6] += a2;
+		    fsm_actuator_to_aberration[actuator-1][7] += c1;
+		    fsm_actuator_to_aberration[actuator-1][8] += c2;
 		}
 		break;
 	
@@ -1268,7 +1393,7 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 					fsm_dm_sum[i]/fabs(fsm_dm_sum[i]);
 		    }
 
-		    /* We now have a final offset form the flat */
+		    /* We now have a final offset from the flat */
 
 		    fsm_dm_offset[i] += fsm_dm_delta[i];
 		    mean_dm_offset += fsm_dm_offset[i];
@@ -2853,6 +2978,7 @@ void move_centroids(float dx, float dy)
                 x_centroid_offsets_reference[i] += dx;
                 y_centroid_offsets_reference[i] += dy;
         }
+	compute_pupil_center();
 
 } /* move_boxes() */
 
@@ -3293,6 +3419,7 @@ void use_reference_on(void)
 	use_reference = TRUE;
 	x_centroid_offsets = x_centroid_offsets_reference;
 	y_centroid_offsets = y_centroid_offsets_reference;
+	compute_pupil_center();
 
 } /* use_reference_on */
 
@@ -3307,6 +3434,7 @@ void use_reference_off(void)
 	use_reference = FALSE;
 	x_centroid_offsets = x_centroid_offsets_beacon;
 	y_centroid_offsets = y_centroid_offsets_beacon;
+	compute_pupil_center();
 
 } /* use_reference_off */
 
@@ -3546,3 +3674,464 @@ int edit_dm_impulse(int argc, char **argv)
 	return NOERROR;
 
 } /* edit_dm_impulse() */
+
+/************************************************************************/
+/* sort_eigen()                                                         */
+/*                                                                      */
+/* Sort eigenvalues and eigenvectors in descending order.               */
+/* Largest eigenvalue and corresponding eigenvector go first,           */
+/* then the next largest, and so forth.                                 */
+/* Input is array of eigenvalues [1...n], matrix of                     */
+/* eigenvectors [1...n][1..n].  Output is sorted arrays.                */
+/* Note that the arrays are in Numerical Recipes format with            */
+/* indices going from 1 to n (rather than 0 to n-1).                    */
+/************************************************************************/
+
+void sort_eigen(float eigenval[], float **eigenvect, int n)
+{
+	float atemp, btemp[n];
+	int i,j,k;
+
+	for (j=2; j<=n; j++)
+	{
+		atemp = eigenval[j];
+		for (k=1; k<=n; k++) btemp[k] = eigenvect[k][j];
+		i=j-1;
+		while (i>0 && eigenval[i] < atemp)
+		{
+			eigenval[i+1] = eigenval[i];
+			for (k=1; k<=n; k++) eigenvect[k][i+1] =eigenvect[k][i];
+			i--;
+		}
+		eigenval[i+1] = atemp;
+		for (k=1; k<=n; k++) eigenvect[k][i+1] = btemp[k];
+	}
+
+} /* sort_eigen() */
+
+/************************************************************************/
+/* compute reconstructor_new()						*/
+/*									*/
+/* Compute the reconstructor.  Save fsm_actuator_to_sensor matrix to    */
+/* file.  Perform singular value decomposition to compute the           */
+/* pseudo-inverse of fsm_actuator_to_sensor matrix.  The inverse        */
+/* will be output as fsm_reconstructor and also saved to file.          */
+/*									*/
+/* ARGUMENTS:                                                           */
+/*   argc: number of parameters in argv                                 */
+/*   argv: optional character array containing the following parameters */
+/*         num_modes in_filename out_filename                           */
+/*         where num_modes is the number of eigenmodes to keep,         */
+/*         in_filename is the name of the file to save the              */
+/*         fsm_actuator_to_sensor matrix, and out_filename is the name  */
+/*         of the file to save the fsm_reconstructor matrix             */
+/************************************************************************/
+
+int compute_reconstructor_new(int argc, char **argv)
+{
+	float **amatrix, **a_inverse, **c_inverse;
+	float **v_eigenvector, *v_eigenvalue, *offdiag_v;
+	float sum, ave_tilt, median_w;
+	float UNSENSED_THRESHOLD;
+	int num_modes;
+	int i, j, k;
+	char in_filename[256], out_filename[256], s[256];
+
+	/* Setup the defaults */
+
+	num_modes = 7;
+	sprintf(in_filename,"%s%s_actuator_to_sensor.tmp", 
+		get_data_directory(s), labao_name);
+	sprintf(out_filename,"%s%s_reconstructor.tmp", 
+		get_data_directory(s), labao_name);
+
+	/* Check which arguments are defined in the call */
+
+	if (argc > 1)
+	  if (sscanf(argv[1], "%d", &num_modes) != 1)
+	    return error(ERROR, 
+	      "Usage: recon [n_modes] [infile (opt)] [outfile (opt)]");
+	if (argc > 2) strcpy(in_filename, argv[2]);
+	if (argc > 3) strcpy(out_filename, argv[3]);
+
+	/* Save fsm_actuator_to_sensor matrix */
+
+	if (save_actuator_to_sensor(in_filename))
+	  return error(ERROR, 
+	    "Could not create temporary actuator_to_sensor file %s.",
+            in_filename);
+
+	/* Initialize matrices to be used with Numerical Recipes */
+
+	amatrix = matrix(1,2*NUM_LENSLETS,1,NUM_ACTUATORS);
+	a_inverse = matrix(1,NUM_ACTUATORS,1,2*NUM_LENSLETS);
+	v_eigenvector = matrix(1,NUM_ACTUATORS,1,NUM_ACTUATORS);
+	c_inverse = matrix(1,NUM_ACTUATORS,1,NUM_ACTUATORS);
+
+	/* Initialize vectors to be used with Numerical Recipes */
+
+	v_eigenvalue = vector(1,NUM_ACTUATORS);
+	offdiag_v = vector(1,NUM_ACTUATORS);
+
+	/* Shift indices of fsm_actuator_to_sensor matrix to be */
+	/* consistent with Numerical Recipes (indices go from   */
+        /* 1 to n instead of 0 to n-1).  Also switch rows and   */
+	/* columns to prepare for singular value decomposition. */
+
+	for (i=0; i<2*NUM_LENSLETS; i++)
+	  for (j=0; j<NUM_ACTUATORS; j++) 
+	    amatrix[i+1][j+1] = fsm_actuator_to_sensor[j][i];
+
+	/* Optionally remove tilt terms */
+	/* Mike's python code removed the tilts if num_modes > 0 */
+	/* However, could we also do this with fsm_ignore_tilt variable? */
+
+	if (num_modes > 0)
+        {
+	  for (i=1; i<=NUM_ACTUATORS; i++)
+          {
+	    /* Compute x tilt - sum over lenslets for each actuator */
+	    ave_tilt = 0.0;
+	    for (j=1; j<=NUM_LENSLETS; j++) 
+	      ave_tilt += amatrix[j][i];
+	    ave_tilt /= NUM_LENSLETS;
+	    for (j=1; j<=NUM_LENSLETS; j++) 
+	      amatrix[j][i] -= ave_tilt;
+	    /* Compute y tilt - sum over lenslets for each actuator */
+	    ave_tilt = 0.0;
+	    for (j=1; j<=NUM_LENSLETS; j++) 
+	      ave_tilt += amatrix[j+NUM_LENSLETS][i];
+	    ave_tilt /= NUM_LENSLETS;
+	    for (j=1; j<=NUM_LENSLETS; j++) 
+	      amatrix[j+NUM_LENSLETS][i] -= ave_tilt;
+	  }	
+	}
+
+	/* Prepare matrices for singular value decomposition to       */
+	/* determine the pseudo-inverse of matrix A.  A rectangular   */
+	/* matrix can be broken down into 3 components:               */
+	/* A = U*W*Vtranspose                                         */
+	/* - columns of U represent eigenvectors of A*Atranspose      */ 
+	/*     [2*NUM_LENSLETS][2*NUM_LENSLETS]                       */
+	/* - columns of V represent eigenvectors of Atranspose*A      */
+	/*     [NUM_ACTUATORS][NUM_ACTUATORS]                         */
+	/* - diagonals of W represent non-zero eigenvalues of U and V */
+	/*     [2*NUM_LENSLETS][NUM_ACTUATORS]                        */
+
+	/* Compute dot product of Atranspose*A                        */
+	/* (set temporarily to v_eigenvector)                         */
+	for (i=1; i<=NUM_ACTUATORS; i++)
+	{
+	  for (j=1; j<=NUM_ACTUATORS; j++) 
+	  { 
+	    sum = 0.0;
+	    for (k=1; k<=2*NUM_LENSLETS; k++)
+	      sum += amatrix[k][i]*amatrix[k][j];
+	    v_eigenvector[i][j] = sum;
+	  }
+	}
+
+	/* Compute eigenvalues and eigenvectors of Atranspose*A       */
+	/* Note: Atranspose*A is a real, symmetric matrix             */
+	/* Step 1: Use householder reduction to convert nxn real,     */
+	/*         symmetric matrix to tridiagonal form (tred2)       */
+	/* Step 2: Compute eigenvectors and eigenvalues of the        */
+	/*         real, symmetric matrix in tridiagonal form         */
+	/*         using tqli in numerical recipes                    */
+	/* Step 3: Sort eigenvalues and eigenvectors in descending    */
+	/*         order according to the eigenvalue.  Largest        */
+	/*         eigenvalue and corresponding eigenvector first,    */
+	/*         then next largest eigenvalue, and so forth.        */
+	/*                                                            */
+	/* If the eigenvectors in U and V are computed independently, */
+	/* there exists an ambiguity in the sign (+/-) assigned to    */
+	/* each eigenvector.  To ensure that the eigenvectors of U    */
+	/* and V are on the same basis, it is possible to compute     */
+	/* either V (or U) from U (or V).                             */
+	/*    A = U*W*Vtranspose                                      */
+	/*    U = A*V*Winverse                                        */
+	/*    Vtranspose = Winverse*Utranspose*A                      */
+	/*    (where U*Utranspose=I, V*Vtranspose=I, W*Winverse=I     */
+
+	/* Compute eigenvalues and eigenvectors of Atranspose*A       */
+
+	tred2(v_eigenvector,NUM_ACTUATORS,v_eigenvalue,offdiag_v);
+	tqli(v_eigenvalue,offdiag_v,NUM_ACTUATORS,v_eigenvector); 
+	sort_eigen(v_eigenvalue,v_eigenvector,NUM_ACTUATORS);
+
+	/* Compute median weight: */
+
+	median_w = v_eigenvalue[(int)(rintf(NUM_ACTUATORS/2))+1];
+
+	/* Apply threshold to the eigenmodes based on num_modes.   */
+	/* If the number of modes is non-zero, then set threshold  */
+	/* to the eigenvalue of that mode.  If the number of modes */
+	/* is set to 0, then use default threshold of 2.1*median.  */
+	/* In python script it says, "This stays a long way from   */
+        /* the DM range when applied (max 0.92 for mean 0.77), and */
+	/* has 10 modes."                                          */
+
+	if (num_modes > 0) UNSENSED_THRESHOLD = v_eigenvalue[num_modes];
+	else UNSENSED_THRESHOLD = 2.1*median_w;
+
+	for (i=1; i<=NUM_ACTUATORS; i++)
+	{
+	  if (fabs(v_eigenvalue[i]) < UNSENSED_THRESHOLD)
+	    v_eigenvalue[i] = 0.0;
+
+	  /* The following is from Mike's code, but I do not */
+	  /* understand why these weights are being raised   */
+
+	  else if (fabs(v_eigenvalue[i]) < 2*UNSENSED_THRESHOLD) 
+	    v_eigenvalue[i] = 2*UNSENSED_THRESHOLD; 
+	}
+
+	/* Compute the reconstructor - pseudo-inverse of matrix A */
+	/* A = U*W*Vtranspose                                     */
+ 	/* A^-1 = V*Winverse*Utranspose                           */
+	/* Substitute Utranspose = Winverse*Vtranspose*Atranspose */
+	/* A^-1 = V*[diag(1/wj^2)]*Vtranspose*Atranspose          */
+
+	/* Step 1: Compute C_inverse = V*[diag(1/wj^2)]*Vtranspose */
+
+	for (i=1; i<=NUM_ACTUATORS; i++)
+	{
+	  for (j=1; j<=NUM_ACTUATORS; j++)
+	  {
+	    sum = 0.0;
+	    for (k=1; k<=NUM_ACTUATORS; k++)
+	      if (fabs(v_eigenvalue[k]) > 0.0)
+		sum += v_eigenvector[i][k]*v_eigenvector[j][k]/v_eigenvalue[k];
+	    c_inverse[i][j] = sum;
+	  }
+	}
+
+	/* Step 2: Compute A_inverse = C_inverse*Atranspose */
+
+	for (i=1; i<=NUM_ACTUATORS; i++)
+	{
+	  for (j=1; j<=2*NUM_LENSLETS; j++)
+	  {
+	    sum = 0.0;
+	    for (k=1; k<=NUM_ACTUATORS; k++)
+	      sum += c_inverse[i][k]*amatrix[j][k];
+	    a_inverse[i][j] = sum;
+	  }
+	}
+
+	/* Step 3: Transfer a_inverse to fsm_reconstructor */
+	/* Shift indices from [1...n] to [0...n-1]         */
+
+	for (i=0; i<NUM_ACTUATORS; i++)
+	  for (j=0; j<2*NUM_LENSLETS; j++)
+	    fsm_reconstructor[i][j] = a_inverse[i+1][j+1];
+
+	/* Save the reconstructor matrix */
+
+	if (save_reconstructor_new(out_filename))
+		return error(ERROR,
+			"Problems loading the temporary reconstructor file.");
+
+	free_matrix(amatrix,1,2*NUM_LENSLETS,1,NUM_ACTUATORS);
+	free_matrix(a_inverse,1,NUM_ACTUATORS,1,2*NUM_LENSLETS);
+	free_matrix(v_eigenvector,1,NUM_ACTUATORS,1,NUM_ACTUATORS);
+	free_matrix(c_inverse,1,NUM_ACTUATORS,1,NUM_ACTUATORS);
+	free_vector(v_eigenvalue,1,NUM_ACTUATORS);
+	free_vector(offdiag_v,1,2*NUM_LENSLETS);
+
+	message(system_window,"New reconstructor saved in %s", out_filename);
+
+	return NOERROR;	
+
+} /* compute_reconstructor_new() */
+
+/************************************************************************/
+/* save_reconstructor_new()						*/
+/*									*/
+/* Save the reconstructor matrix to a file                              */ 
+/************************************************************************/
+
+int save_reconstructor_new(char* filename_in)
+{
+	char filename[256], s[256];
+	FILE *params_file;
+	int i,j;
+
+	if (filename_in != NULL)
+	{
+ 		strcpy(filename, filename_in);
+	}
+	else
+	{
+		sprintf(filename,"%s%s_reconstructor.dat", 
+			get_data_directory(s), labao_name);
+        }
+
+  	/* Start with the defaults, in case there is a problem loading */
+  
+  	if ((params_file = fopen(filename,"w")) == NULL ) return -1;
+
+  	/* Save the reconstructor matrix */
+
+	for (i=0;i<NUM_ACTUATORS;i++)
+	{
+		for (j=0;j<2*NUM_LENSLETS;j++)
+			fprintf(params_file, "%10.3e ", 
+				fsm_reconstructor[i][j]);
+		fprintf(params_file, "\n");
+	}
+
+	/* That is all. */
+
+	fclose(params_file);
+
+	return 0;
+	
+} /* save_reconstructor_new() */
+
+/************************************************************************/
+/* read_actuator_to_sensor()                                            */
+/*                                                                      */
+/* Read the actuator to sensor matrix, used to create the reconstructor */
+/************************************************************************/
+
+int read_actuator_to_sensor(int argc, char **argv)
+{
+	char	filename[3456];
+	char	s[3456];
+	char 	*p;
+	FILE	*fp;
+	int	i = 0, j = 0;
+
+	/* Has there been an argument on the command line? */
+
+	if (argc > 1)
+	{
+		strcpy(filename, argv[1]);
+	}
+	else
+	{
+		sprintf(filename,"%s%s_actuator_to_sensor.dat",
+                        get_data_directory(s), labao_name);
+	}
+
+	/* Open the file */
+
+	if ((fp = fopen(filename, "r")) == NULL)
+		return error(ERROR, "Failed to open file %s", filename);
+
+	/* Get the data */
+
+	for (i=0; i<NUM_ACTUATORS; i++)
+	{
+		/* Get a line of data */
+
+		if (GetDataLine(s, 3456, fp) == -1)
+		{
+			fclose(fp);
+			return error(ERROR,"We ran out lines of data (%d, %d).",
+				i, j);
+		}
+		p = s;
+
+		for(j=0;j<2*NUM_LENSLETS;j++)
+		{
+			/* Find first non white space */
+
+			while(*p == ' ' && *p != 0) p++;
+
+			/* Read in a number */
+
+			if (sscanf(p, "%f", &(fsm_actuator_to_sensor[i][j]))!=1)
+			{
+				fclose(fp);
+				return error(ERROR,
+					"We ran out data (%d, %d).", i, j);
+			}
+
+			/* Find white space */
+
+			while (*p != ' ' && *p != '\t' && *p != 0) p++;
+		}
+	}
+
+	fclose(fp);
+
+	message(system_window,"Read in matrix from file %s.", filename);
+	return NOERROR;
+
+} /* read_actuator_to_sensor() */
+
+/************************************************************************/
+/* read_actuator_to_aberration()                                        */
+/*                                                                      */
+/* Read the actuator to aberration matrix				*/
+/************************************************************************/
+
+int read_actuator_to_aberration(int argc, char **argv)
+{
+	char	filename[3456];
+	char	s[3456];
+	char 	*p;
+	FILE	*fp;
+	int	i = 0, j = 0;
+
+	/* Has there been an argument on the command line? */
+
+	if (argc > 1)
+	{
+		strcpy(filename, argv[1]);
+	}
+	else
+	{
+		sprintf(filename,"%s%s_actuator_to_aberration.dat",
+                        get_data_directory(s), labao_name);
+	}
+
+	/* Open the file */
+
+	if ((fp = fopen(filename, "r")) == NULL)
+		return error(ERROR, "Failed to open file %s", filename);
+
+	/* Get the data */
+
+	for (i=0; i<NUM_ACTUATORS; i++)
+	{
+		/* Get a line of data */
+
+		if (GetDataLine(s, 3456, fp) == -1)
+		{
+			fclose(fp);
+			return error(ERROR,"We ran out lines of data (%d, %d).",
+				i, j);
+		}
+		p = s;
+
+		for(j=0;j<NUM_ABERRATIONS;j++)
+		{
+			/* Find first non white space */
+
+			while(*p == ' ' && *p != 0) p++;
+
+			/* Read in a number */
+
+			if (sscanf(p,"%f",&(fsm_actuator_to_aberration[i][j]))
+				!=1)
+			{
+				fclose(fp);
+				return error(ERROR,
+					"We ran out data (%d, %d).", i, j);
+			}
+
+			/* Find white space */
+
+			while (*p != ' ' && *p != '\t' && *p != 0) p++;
+		}
+	}
+
+	fclose(fp);
+
+	message(system_window,"Read in matrix from file %s.", filename);
+	return NOERROR;
+
+} /* read_actuator_to_aberration() */

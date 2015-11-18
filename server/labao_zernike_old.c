@@ -1,8 +1,7 @@
 /************************************************************************/
 /* labao_zernike.c							*/
 /*                                                                      */
-/* Tries to impose Zernike terms on the actuators. This is uncalibrated.*/
-/* This newer version uses the reconstructor to do it's work.		*/
+/* Tries to impose Zernike terms on teh actuators. This is uncalibrated.*/
 /************************************************************************/
 /*                                                                      */
 /*                    CHARA ARRAY USER INTERFACE			*/
@@ -31,12 +30,25 @@
 
 // #define TEST_ZERNIKE
 
+/* Where is each actuator? */
+ 
+static float actuator_x[NUM_ACTUATORS+1] = {0, /* Numbering starts from 1 */
+	0.0, -1, -0.5, 0.5, 1.0, 0.5, -0.5, 
+	-2, -1.5, -1.0, 0.0, 1.0, 1.5, 2.0, 1.5, 1.0, 0.0, -1.0, -1.5,
+	-3.0, -2.5, -2.0, -1.5, -0.5, 0.5, 1.5, 2.0, 2.5, 3.0, 2.5, 
+	2.0, 1.5, 0.5 ,-0.5, -1.5, -2.0, -2.5};
+
+static float actuator_y[NUM_ACTUATORS+1] = {0, /* Numbering starts from 1 */
+	0, 0, 1, 1, 0, -1,-1, 0, 1, 2, 2, 2, 1, 0, -1, -2, -2, -2, -1,
+	0, 1, 2, 3, 3, 3, 3, 2, 1, 0, -1, -2, -3, -3, -3, -3, -2, -1};
+
+static float *actuator_zernike_values[NUM_ACTUATORS+1];
+
 static float *zernike_values;
 
+static float zernike_max, zernike_min;
+
 static pthread_mutex_t zernike_mutex = PTHREAD_MUTEX_INITIALIZER;
-static float rho[NUM_LENSLETS];
-static float rho_size;
-static float theta[NUM_LENSLETS];
 
 /************************************************************************/
 /* setup_zernike()							*/
@@ -47,14 +59,78 @@ static float theta[NUM_LENSLETS];
 
 void setup_zernike(void)
 {
+	int	i, j;
+#ifdef TEST_ZERNIKE
+	FILE	*fp;
+#endif
+	float	rho, theta;
+
         /* Make the mutex so this will be thread safe */
 
         if (pthread_mutex_init(&zernike_mutex, NULL) != 0)
                 error(FATAL, "Unable to create Zernike mutex.");
 
+	/* Normalize the x and y */
+
+	for (i=1; i<= NUM_ACTUATORS; i++)
+	{
+		actuator_x[i] /= 3.0;
+		actuator_y[i] *= (sqrt(0.75)/3.0);
+	}
+
 	/* Setup the zernike stuff */
 
 	set_up_zernike_calcs(maxJ);
+
+	/* Allocate memory iand fill things in */
+
+	actuator_zernike_values[0] = NULL;
+	zernike_max = -1e32;
+	zernike_min = 1e32;
+	for (i=1; i<= NUM_ACTUATORS; i++)
+	{
+		actuator_zernike_values[i]=malloc(sizeof(float)*(maxJ+1));
+		if (actuator_zernike_values[i] == NULL)
+			error(FATAL, "Not enough memory.");
+
+		rho = sqrt(actuator_x[i]*actuator_x[i] +
+			   actuator_y[i]*actuator_y[i]);
+		if (rho > 1.0) rho = 1.0;
+
+		theta = atan2(actuator_y[i], actuator_x[i]);
+		if (theta < 0.0) theta += (2.0*M_PI);
+
+		for(j=1; j<= maxJ; j++)
+		{
+			actuator_zernike_values[i][j] = zernike(j,rho,theta);
+			if (actuator_zernike_values[i][j] > zernike_max)
+				zernike_max = actuator_zernike_values[i][j];
+			else if (actuator_zernike_values[i][j] < zernike_min)
+				zernike_min = actuator_zernike_values[i][j];
+		}
+	}
+
+	/* For a check */
+
+#ifdef TEST_ZERNIKE
+	fp = fopen("zernike_test.dat", "w");
+	if (fp != NULL)
+	{
+		for (i=1; i<= NUM_ACTUATORS; i++)
+		{
+			fprintf(fp,"%2d %6.3f %6.3f %6.3f %6.3f", i,
+				actuator_x[i],
+				actuator_y[i],
+				sqrt(actuator_x[i]*actuator_x[i] +
+			   	actuator_y[i]*actuator_y[i]),
+				atan2(actuator_y[i], actuator_x[i])/M_PI*180.0);
+			for(j=1; j<= maxJ; j++) fprintf(fp," %6.3f",
+				actuator_zernike_values[i][j]);
+			fprintf(fp,"\n");
+		}
+	}
+	fclose(fp);
+#endif
 
 	/* Now we allocate the first version of the zernike values */
 
@@ -63,6 +139,8 @@ void setup_zernike(void)
 	
 	zernike_values[1] = 0.0;
 	for(j = 2; j <= maxJ; j++) zernike_values[j] = 0.0;
+
+	zernike_to_dm();
 
 } /* setup_zernike() */
 	
@@ -78,134 +156,13 @@ void cleanup_zernike(void)
 
 	clean_up_zernike_calcs();
 
+	for (i=1; i<= NUM_ACTUATORS; i++) free(actuator_zernike_values[i]);
+
 	/* Now we allocate the first version of the zernike values */
 
 	free(zernike_values);
 
 } /* cleanup_zernike() */
-
-/************************************************************************/
-/* compute_centroid_offset_rho_theta()					*/
-/*									*/
-/* We need a rho and theta for each subaperture.			*/
-/************************************************************************/
-
-void compute_centroid_offset_rho_theta(void)
-{
-	int	i, j;
-	float	x, y;
-	float	size;
-	float	*a;
-
-	size = max_offset + min_doffset/2.0;
-	rho_size = min_doffset/(2.0 * size);
-
-	for(i=0; i<NUM_LENSLETS; i++)
-	{
-		x = (x_centroid_offsets[i] - x_mean_offset)/size;
-		y = (y_centroid_offsets[i] - y_mean_offset)/size;
-
-		rho[i] = sqrt(x*x + y*y);
-		if (rho[i] > 1.0) rho[i] = 1.0;
-
-		theta[i] = atan2(y, x);
-		if (theta[i] < 0.0) theta[i] += (2.0*M_PI);
-	}
-
-	/* We also need to create a new reconstructor for Zernikes */
-
- 	for (i=0; i<NUM_ACTUATORS; i++)
-        {
-            for (j=0; j<2*NUM_LENSLETS; j++)
-            {
-                zernike_reconstructor[i][j]=0.0;
-                fsm_actuator_to_sensor[i][j]=0.0;
-            }
-	}
-
-	a = vector(1, maxJ);
-	for (i=0; i<maxJ; i++)
-	{
-	    for(j=1; j<=maxJ; j++) a[j] = 0.0;
-	    a[i+1] = 1.0;
-	    compute_offsets_from_zernike(a, xc, yc);
-
-	    for(j=0; j<NUM_LENSLETS; j++)
-	    {
-		    fsm_actuator_to_sensor[i][j] = xc[j];
-		    fsm_actuator_to_sensor[i][NUM_LENSLETS + j] = yc[j];
-	    }
-	}
-	free_vector(a, 1, maxJ);
-
-	compute_reconstructor_new(0, NULL);
-
-	for(i=0; i<NUM_ACTUATORS; i++)
-            for (j=0; j<2*NUM_LENSLETS; j++)
-		zernike_reconstructor[i][j] = fsm_reconstructor[i][j];
-
-} /* compute_centroid_offset_rho_theta() */
-
-/************************************************************************/
-/* compute_offsets_from_zernike()					*/
-/*									*/
-/* Given an aray of zernike's assumed setup for mircons of path, returns*/
-/* the offsets theory says the lenslet array should see.		*/
-/************************************************************************/
-
-void compute_offsets_from_zernike(float *a, float *x, float *y)
-{
-	int i,j,k;
-	aperture_pixels **pixels;
-	float	**image;
-	float	dx, dy, flux;
-
-
-	for(i=0; i<NUM_LENSLETS; i++)
-	{
-		/* Build a subaperture */
-
-		pixels = sub_aperture(CENTROID_WINDOW_WIDTH, maxJ,
-				rho[j], theta[j], rho_size);
-
-		/* 
- 		 * Work out the image 
- 	 	 * This is predicated on the assumption that 
- 		 * the image size is about 1 pixel. The calculate_image
- 		 * function makes the airy size 2^imbedp2/npix, so
- 		 * we hope that this works...
- 		 */
-
-		image = calculate_image(pixels, 9, 3, maxJ, 0.45, a);
-
-		/* Simmulate the WFS calculation */
-
-		dx = 0.0;
-		dy = 0.0;
-		flux = 0.0;
-		for(j = 1; j<=9; j++)
-		for(k = 1; k<=9; k++)
-		{
-			flux += image[j][k];
-			dx += (image[j][k] * (float)(j - 5));
-			dy += (image[j][k] * (float)(k - 5));
-		}
-		dx /= flux;
-		dy /= flux;
-
-		/* That should be all */
-
-		x[i] = dx;
-		y[i] = dy
-		
-		/* Clear memory */
-
-		free_sub_aperture(pixels,CENTROID_WINDOW_WIDTH);
-		free_matrix(image, 1, 9, 1, 9);
-
-	}
-
-} /* compute_centroid_offset_rho_theta() */
 
 /************************************************************************/
 /* zernike_to_dm()							*/
@@ -220,29 +177,20 @@ int zernike_to_dm(void)
 {
 	float	*values;
 	int	i, j;
-	float	x[NUM_LENSLETS];
-	float	y[NUM_LENSLETS];
 
 	values = vector(1, NUM_ACTUATORS);
 
         pthread_mutex_lock(&zernike_mutex);
-
-	/* What would the WFS see if this we happening? */
-
-	compute_offsets_from_zernike(zernike_values, x, y);
-
-	/* Apply the reconstructor to get actuator positions */
-
-	for(i=0; i< NUM_ACTUATORS; i++)
+	for(i=1; i<= NUM_ACTUATORS; i++)
 	{
-		values[i+1] = fsm_flat_dm[i];
+		values[i] = 0.0;
 
-		for(j=0; j<NUM_LENSLETS; j++)
-			values[i] -=
-                                ((fsm_reconstructor[i][j] * x[j]) +
-                                (fsm_reconstructor[i][NUM_LENSLETS+j] * y[j]));
+		for(j=1; j <= maxJ; j++)
+		{
+			values[i] += (zernike_values[j] * 
+				actuator_zernike_values[i][j]);
+		}
 	}
-	
         pthread_mutex_unlock(&zernike_mutex);
 
 	if (edac40_set_all_channels(values) < 0) return -1;
@@ -254,7 +202,8 @@ int zernike_to_dm(void)
 } /* zernike_to_dm() */
 
 /************************************************************************/
-/* increment_zernike()							*/ /* 									*/
+/* increment_zernike()							*/
+/* 									*/
 /* Incriment a sinlge zernike mode by a given amount.			*/
 /* Returns:								*/
 /* 0 - If all goes well.						*/

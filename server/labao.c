@@ -21,6 +21,7 @@
 /* 5.1 - More functionality added for tiptilt messages to WFS.          */
 /* 5.2 - Automated Coude/Dichroic corrections added                     */
 /* 6.0 - No changes but wanted to make the version clearly new.		*/
+/* 6.1 - Added Gail's new reconstructor calculation code.		*/
 /************************************************************************/
 /*                                                                      */
 /*                    CHARA ARRAY USER INTERFACE			*/
@@ -93,7 +94,7 @@ int main(int argc, char **argv)
                                   break;
 
 			case 'j': if (sscanf(p+1,"%d",&maxJ) != 1 ||
-					maxJ < 21)
+					maxJ < 21 || maxJ > NUM_LENSLETS)
                                   {
                                     print_usage_message(name);
                                     exit(-1);
@@ -155,7 +156,7 @@ int main(int argc, char **argv)
 	ui_clear_screen();
 	put_line("");
 
-	sprintf(title,"%s 6.0",labao_name);
+	sprintf(title,"%s 6.1",labao_name);
 	center_line(title);
 	put_line("");
 	center_line("The CHARA Array");
@@ -232,10 +233,6 @@ void labao_open(void)
 
 	open_edac40(0, NULL);
 	
-	/* Initialize the zernike stuff */
-
-	setup_zernike();
-
 	/* Can we find a USB camera to talk to? */
 
 	open_usb_camera();
@@ -251,6 +248,10 @@ void labao_open(void)
 	/* Load the reconstructor */
 
 	call_load_reconstructor(0,NULL);
+
+	/* Initialize the zernike stuff */
+
+	setup_zernike();
 
 	/* Set the USB callback function */
 
@@ -328,7 +329,8 @@ void print_usage_message(char *name)
         fprintf(stderr,"usage: %s [-flags] name {display}\n",name);
         fprintf(stderr,"Flags:\n");
         fprintf(stderr,"-h\t\tPrint this message\n");
-	fprintf(stderr,"-j\t\tSet maximum Zernike mode (%d)\n", DEFAULT_MAXJ);
+	fprintf(stderr,"-j\t\tSet maximum Zernike mode 1..%d (%d)\n", 
+		NUM_LENSLETS, DEFAULT_MAXJ);
         fprintf(stderr,"-s\t\tToggle use of socketmanager (ON)\n");
 
 } /* print_usage_message() */

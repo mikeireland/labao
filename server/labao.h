@@ -78,6 +78,8 @@
 #define SERVO_INTEGRATION 0.0
 #define SERVO_SUM_MAX 0.01
 
+#define CENTROID_WINDOW_WIDTH 5
+
 /*
  * Some globals
  */
@@ -93,6 +95,10 @@ extern int fsm_state;
 
 extern float *x_centroid_offsets;
 extern float *y_centroid_offsets;
+extern float *x_centroid_offsets_beacon[NUM_LENSLETS];
+extern float *y_centroid_offsets_beacon[NUM_LENSLETS];
+extern float *x_centroid_offsets_reference[NUM_LENSLETS];
+extern float *y_centroid_offsets_reference[NUM_LENSLETS];
 
 /* These globals are strictly read-only from the main thread. */
 
@@ -100,6 +106,10 @@ extern float xc[NUM_LENSLETS];
 extern float yc[NUM_LENSLETS];
 extern float avg_fluxes[NUM_LENSLETS];
 extern struct s_labao_wfs_results wfs_results;
+extern float fsm_reconstructor[NUM_ACTUATORS][2*NUM_LENSLETS];
+extern float zernike_reconstructor[NUM_ACTUATORS][2*NUM_LENSLETS];
+extern float fsm_actuator_to_sensor[NUM_ACTUATORS][2*NUM_LENSLETS];
+extern float x_mean_offset, y_mean_offset, max_offset, min_doffset;
 
 /* How is the camera setup? */
 
@@ -124,6 +134,7 @@ extern float servo_gain;
 extern float servo_damping;
 extern float servo_integration;
 extern bool iris_at_beam_size;
+extern float *fsm_flat_dm;
 
 /* So we know where the telescope is */
 
@@ -216,6 +227,7 @@ int call_edac40_add_all_channels(int argc, char **argv);
 
 void setup_zernike(void);
 void cleanup_zernike(void);
+void compute_centroid_offset_rho_theta(void);
 int zernike_to_dm(void);
 int increment_zernike(int J, float delta);
 int set_zernike(int J, float value);
@@ -278,6 +290,8 @@ int save_defaults(char *filename_in);
 int call_save_defaults(int argc, char **argv);
 int save_actuator_to_sensor(char *filename_in);
 int call_save_actuator_to_sensor(int argc, char **argv);
+int save_actuator_to_aberration(char *filename_in);
+int call_save_actuator_to_aberration(int argc, char **argv);
 int load_reconstructor(char *filename_in);
 int call_load_reconstructor(int argc, char **argv);
 void zero_centroids(void);
@@ -328,6 +342,11 @@ int message_aob_change_dichroic(struct smessage *message);
 int toggle_coude_dichroic_corrections(int argc, char **argv);
 int edit_coude_dichroic_corrections(int argc, char **argv);
 int edit_dm_impulse(int argc, char **argv);
+void sort_eigen(float eigenval[], float **eigenvect, int n);
+int compute_reconstructor_new(int argc, char **argv);
+int save_reconstructor_new(char* filename_in);
+int read_actuator_to_sensor(int argc, char **argv);
+int read_actuator_to_aberration(int argc, char **argv);
 
 /* labao_tiptilt_data_socket.c */
 

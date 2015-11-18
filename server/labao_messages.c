@@ -330,7 +330,10 @@ int message_labao_run_function(struct smessage *message)
 		case LABAO_LOAD_RECONSTRUCTOR:
 			return  call_load_reconstructor(0, NULL);
 		case LABAO_SAVE_ACTUATOR_TO_SENSOR:
+		{
+			call_save_actuator_to_aberration(0, NULL);
 			return  call_save_actuator_to_sensor(0, NULL);
+		}
 		case LABAO_ZERO_CENTROIDS:
 			return  call_zero_centroids(0, NULL);
 		case LABAO_CLOSE_SERVO:
