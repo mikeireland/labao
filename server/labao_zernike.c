@@ -29,7 +29,9 @@
 #include "labao.h"
 #include <zernike.h>
 
-// #define TEST_ZERNIKE
+//#define TEST_ZERNIKE_1
+#define TEST_ZERNIKE_1_DELAY  250000
+//#define TEST_ZERNIKE_2
 
 static float *zernike_values;
 
@@ -47,6 +49,8 @@ static float theta[NUM_LENSLETS];
 
 void setup_zernike(void)
 {
+	int	j;
+
         /* Make the mutex so this will be thread safe */
 
         if (pthread_mutex_init(&zernike_mutex, NULL) != 0)
@@ -61,6 +65,7 @@ void setup_zernike(void)
 	zernike_values = malloc(sizeof(float)*(maxJ+1));
 	if (zernike_values == NULL) error(FATAL, "Not enough memory.");
 	
+	zernike_values[0] = 1.0;
 	zernike_values[1] = 0.0;
 	for(j = 2; j <= maxJ; j++) zernike_values[j] = 0.0;
 
@@ -74,8 +79,6 @@ void setup_zernike(void)
 
 void cleanup_zernike(void)
 {
-	int	i;
-
 	clean_up_zernike_calcs();
 
 	/* Now we allocate the first version of the zernike values */
@@ -93,22 +96,26 @@ void cleanup_zernike(void)
 void compute_centroid_offset_rho_theta(void)
 {
 	int	i, j;
-	float	x, y;
 	float	size;
-	float	*a;
+	float	a[NUM_ACTUATORS+1];
+	float	norm[NUM_ACTUATORS+1];
+	float	x[NUM_LENSLETS];
+	float	y[NUM_LENSLETS];
+	float	x1, y1;
+	float	old_reconstructor[NUM_ACTUATORS][2*NUM_LENSLETS];
 
 	size = max_offset + min_doffset/2.0;
-	rho_size = min_doffset/(2.0 * size);
+	rho_size = 0.95*min_doffset/(2.0 * size);
 
 	for(i=0; i<NUM_LENSLETS; i++)
 	{
-		x = (x_centroid_offsets[i] - x_mean_offset)/size;
-		y = (y_centroid_offsets[i] - y_mean_offset)/size;
+		x1 = (x_centroid_offsets[i] - x_mean_offset)/size;
+		y1 = (y_centroid_offsets[i] - y_mean_offset)/size;
 
-		rho[i] = sqrt(x*x + y*y);
+		rho[i] = sqrt(x1*x1 + y1*y1);
 		if (rho[i] > 1.0) rho[i] = 1.0;
 
-		theta[i] = atan2(y, x);
+		theta[i] = atan2(y1, x1);
 		if (theta[i] < 0.0) theta[i] += (2.0*M_PI);
 	}
 
@@ -118,31 +125,66 @@ void compute_centroid_offset_rho_theta(void)
         {
             for (j=0; j<2*NUM_LENSLETS; j++)
             {
-                zernike_reconstructor[i][j]=0.0;
-                fsm_actuator_to_sensor[i][j]=0.0;
+                zernike_reconstructor[i][j] = 0.0;
+                fsm_actuator_to_sensor[i][j] = 0.0;
+		old_reconstructor[i][j] = fsm_reconstructor[i][j];
             }
 	}
 
-	a = vector(1, maxJ);
-	for (i=0; i<maxJ; i++)
+	for (i=1; i<maxJ; i++)
 	{
-	    for(j=1; j<=maxJ; j++) a[j] = 0.0;
-	    a[i+1] = 1.0;
-	    compute_offsets_from_zernike(a, xc, yc);
+	    for(j=0; j<=maxJ; j++) a[j] = 0.0;
+	    a[0] = a[i+1] = 2.0;
+	    compute_offsets_from_zernike(a, x, y);
 
 	    for(j=0; j<NUM_LENSLETS; j++)
 	    {
-		    fsm_actuator_to_sensor[i][j] = xc[j];
-		    fsm_actuator_to_sensor[i][NUM_LENSLETS + j] = yc[j];
+		    fsm_actuator_to_sensor[i][j] = x[j]/2.0;
+		    fsm_actuator_to_sensor[i][NUM_LENSLETS + j] = y[j]/2.0;
 	    }
 	}
-	free_vector(a, 1, maxJ);
 
 	compute_reconstructor_new(0, NULL);
 
 	for(i=0; i<NUM_ACTUATORS; i++)
+	{
             for (j=0; j<2*NUM_LENSLETS; j++)
+	    {
 		zernike_reconstructor[i][j] = fsm_reconstructor[i][j];
+		fsm_reconstructor[i][j] = old_reconstructor[i][j];
+	    }
+	}
+
+#warning TALK TO MIKE ABOUT THIS
+
+	/* Now, we need to normalize the reconstructor - not sure why */
+
+	for (i=1; i<maxJ; i++)
+	{
+	    for(j=0; j<NUM_ACTUATORS; j++) a[j] = 0.0;
+	    a[0] = a[i+1] = 2.0;
+	    compute_offsets_from_zernike(a, x, y);
+
+	    norm[i+1] = 0.0;
+	    for(j=0; j<NUM_LENSLETS; j++)
+	    {
+                norm[i+1] += (zernike_reconstructor[i][j] * x[j] +
+                           zernike_reconstructor[i][NUM_LENSLETS+j] * y[j]);
+	    }
+	    norm[i+1] /= 2.0;
+	}
+
+	a[0] = a[1] = 1.0;
+        for (i=0;i<NUM_ACTUATORS;i++) 
+	{
+#ifdef TEST_ZERNIKE_2
+	    error(MESSAGE,"%d %f",i+1, norm[i+1]);
+#endif
+            for (j=0;j<2*NUM_LENSLETS;j++)
+	    {
+		zernike_reconstructor[i][j] /= norm[i+1];
+	    }
+	}
 
 } /* compute_centroid_offset_rho_theta() */
 
@@ -156,17 +198,62 @@ void compute_centroid_offset_rho_theta(void)
 void compute_offsets_from_zernike(float *a, float *x, float *y)
 {
 	int i,j,k;
-	aperture_pixels **pixels;
+	aperture_pixel **pixels;
 	float	**image;
 	float	dx, dy, flux;
+	float	test_a[NUM_ACTUATORS+1];
+	float	cen_x, cen_y;
+#ifdef TEST_ZERNIKE_1
+	Window	phaseWindow;
+	Window	imageWindow;
 
+	phaseWindow = openWindow("Phase", 10, 10, 128, 128);
+	imageWindow = openWindow("Image", 148, 10, 128, 128);
+#endif
+
+	/* First we need to know where the "center" is */
+
+	test_a[0] = 1.0;
+	for(i=1; i<=maxJ; i++) test_a[i] = 0.0;
+	pixels = sub_aperture(15, maxJ, 0.0, 0.0, rho_size);
+#ifdef TEST_ZERNIKE_1
+	display_phase(phaseWindow, pixels, 2.0*M_PI, test_a, maxJ, 15, 
+		8, LIN);
+	display_image(imageWindow, pixels, 2.0*M_PI, test_a, maxJ, 15, 
+		8, 5, LIN);
+#endif
+	image = calculate_image(pixels, 15, 5, maxJ, 2.0*M_PI, test_a);
+	cen_x = 0.0;
+	cen_y = 0.0;
+	flux = 0.0;
+	for(j = 1; j<=15; j++)
+	{
+	    for(k = 1; k<=15; k++)
+	    {
+		flux += image[j][k];
+		cen_x += (image[j][k] * (float)j);
+		cen_y += (image[j][k] * (float)k);
+	    }
+	}
+	cen_x /= flux;
+	cen_y /= flux;
+#ifdef TEST_ZERNIKE_1
+	message(system_window,"Center %.2f %.2f", cen_x, cen_y);
+	usleep(TEST_ZERNIKE_1_DELAY);
+#endif
 
 	for(i=0; i<NUM_LENSLETS; i++)
 	{
 		/* Build a subaperture */
 
-		pixels = sub_aperture(CENTROID_WINDOW_WIDTH, maxJ,
-				rho[j], theta[j], rho_size);
+		pixels = sub_aperture(16, maxJ, rho[i], theta[i], rho_size);
+
+#ifdef TEST_ZERNIKE_1
+		display_phase(phaseWindow, pixels, 2.0*M_PI, a, maxJ, 15, 
+				8, LIN);
+		display_image(imageWindow, pixels, 2.0*M_PI, a, maxJ, 15, 
+				8, 5, LIN);
+#endif
 
 		/* 
  		 * Work out the image 
@@ -176,19 +263,21 @@ void compute_offsets_from_zernike(float *a, float *x, float *y)
  		 * we hope that this works...
  		 */
 
-		image = calculate_image(pixels, 9, 3, maxJ, 0.45, a);
+		image = calculate_image(pixels, 15, 5, maxJ, 2.0*M_PI, a);
 
 		/* Simmulate the WFS calculation */
 
 		dx = 0.0;
 		dy = 0.0;
 		flux = 0.0;
-		for(j = 1; j<=9; j++)
-		for(k = 1; k<=9; k++)
+		for(j = 1; j<=15; j++)
 		{
+		    for(k = 1; k<=15; k++)
+		    {
 			flux += image[j][k];
-			dx += (image[j][k] * (float)(j - 5));
-			dy += (image[j][k] * (float)(k - 5));
+			dx += (image[j][k] * ((float)j - cen_x));
+			dy += (image[j][k] * ((float)k - cen_y));
+		    }
 		}
 		dx /= flux;
 		dy /= flux;
@@ -196,14 +285,21 @@ void compute_offsets_from_zernike(float *a, float *x, float *y)
 		/* That should be all */
 
 		x[i] = dx;
-		y[i] = dy
-		
+		y[i] = dy;
+
 		/* Clear memory */
 
 		free_sub_aperture(pixels,CENTROID_WINDOW_WIDTH);
 		free_matrix(image, 1, 9, 1, 9);
-
+#ifdef TEST_ZERNIKE_1
+		message(system_window,"Lenslet %d Pos %.2f %.2f Flux %.2f",i, dx, dy, flux);
+		usleep(TEST_ZERNIKE_1_DELAY);
+#endif
 	}
+
+#ifdef TEST_ZERNIKE_1
+	XDestroyWindow(theDisplay, phaseWindow);
+#endif
 
 } /* compute_centroid_offset_rho_theta() */
 
@@ -222,6 +318,10 @@ int zernike_to_dm(void)
 	int	i, j;
 	float	x[NUM_LENSLETS];
 	float	y[NUM_LENSLETS];
+#ifdef TEST_ZERNIKE_2
+	float	a[NUM_ACTUATORS+1];
+	FILE	*fp;
+#endif
 
 	values = vector(1, NUM_ACTUATORS);
 
@@ -235,7 +335,7 @@ int zernike_to_dm(void)
 
 	for(i=0; i< NUM_ACTUATORS; i++)
 	{
-		values[i+1] = fsm_flat_dm[i];
+		values[i] = fsm_flat_dm[i];
 
 		for(j=0; j<NUM_LENSLETS; j++)
 			values[i] -=
@@ -245,7 +345,32 @@ int zernike_to_dm(void)
 	
         pthread_mutex_unlock(&zernike_mutex);
 
+#ifdef TEST_ZERNIKE_2
+	for(j=0; j<NUM_LENSLETS; j++)
+	{
+		xc[j] = x[j];
+		yc[j] = y[j];
+	}
+	a[0] = 1.0;
+        for (i=0;i<NUM_ACTUATORS;i++)
+        {
+            a[i+1] = 0.0;
+            for (j=0;j<NUM_LENSLETS;j++)
+            {
+                a[i+1] += (zernike_reconstructor[i][j] * x[j] +
+                           zernike_reconstructor[i][NUM_LENSLETS+j] * y[j]);
+            }
+        }
+	fp = fopen("zernike.dat", "a");
+        for (i=0;i<=maxJ;i++) fprintf(fp, "%.2f ", zernike_values[i]);
+	fprintf(fp,"\n");
+        for (i=0;i<=maxJ;i++) fprintf(fp, "%.2f ", a[i]);
+	fprintf(fp,"\n");
+	fflush(fp);
+	fclose(fp);
+#else
 	if (edac40_set_all_channels(values) < 0) return -1;
+#endif
 
 	free_vector(values, 1, NUM_ACTUATORS);
 
@@ -371,7 +496,9 @@ int call_increment_zernike(int argc, char **argv)
 			"Failed to incirment Zernike Mode %d by %.3f",
 			J, delta);
 	
+#ifndef TEST_ZERNIKE_2
 	edac40_send_current_voltages();
+#endif
 
 	return NOERROR;
 
@@ -425,7 +552,9 @@ int call_set_zernike(int argc, char **argv)
 			"Failed to set Zernike Mode %d to %.3f",
 			J, value);
 	
+#ifndef TEST_ZERNIKE_2
 	edac40_send_current_voltages();
+#endif
 
 	return NOERROR;
 
@@ -439,28 +568,19 @@ int call_set_zernike(int argc, char **argv)
 
 int test_set_all_zernike(int argc, char **argv)
 {
-	int	i, J, j;
-	float	max;
+	int	J, j;
 	float	*values;
 
 	values = vector(1, maxJ);
 
 	for(J = 1; J <= maxJ; J++)
 	{
-		max = -1e32;
-		for(i=1; i<= NUM_ACTUATORS; i++)
-		{
-			if (fabs(actuator_zernike_values[i][J]) > max)
-				max = fabs(actuator_zernike_values[i][J]);
-		}
-		max *= 2.0;
-
 		for (j=1; j<=maxJ; j++)
 		{
 			if (j == 1)
 				values[j] = 0.5;
 			else if (j == J)
-				values[j] = 1.0/max;
+				values[j] = 1.0;
 			else
 				values[j] = 0.0;
 		}
@@ -468,11 +588,13 @@ int test_set_all_zernike(int argc, char **argv)
 		if (set_all_zernike(values) < 0)
 			return error(ERROR,
 			"Failed to set Zernike Mode %d to %.3f",
-			J, 1.0/max);
+			J, 1.0);
 
 		message(system_window,"Zernike Mode %d", J);
 
+#ifndef TEST_ZERNIKE_2
 		edac40_send_current_voltages();
+#endif
 
 		show_edac40_values(0, NULL);
 	}
@@ -514,7 +636,9 @@ int reset_all_zernike(int argc, char **argv)
 	}
 	free_vector(values, 1, maxJ);
 
+#ifndef TEST_ZERNIKE_2
 	edac40_send_current_voltages();
+#endif
 
 	return NOERROR;
 

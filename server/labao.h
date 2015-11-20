@@ -95,10 +95,10 @@ extern int fsm_state;
 
 extern float *x_centroid_offsets;
 extern float *y_centroid_offsets;
-extern float *x_centroid_offsets_beacon[NUM_LENSLETS];
-extern float *y_centroid_offsets_beacon[NUM_LENSLETS];
-extern float *x_centroid_offsets_reference[NUM_LENSLETS];
-extern float *y_centroid_offsets_reference[NUM_LENSLETS];
+extern float x_centroid_offsets_beacon[NUM_LENSLETS];
+extern float y_centroid_offsets_beacon[NUM_LENSLETS];
+extern float x_centroid_offsets_reference[NUM_LENSLETS];
+extern float y_centroid_offsets_reference[NUM_LENSLETS];
 
 /* These globals are strictly read-only from the main thread. */
 
@@ -228,6 +228,7 @@ int call_edac40_add_all_channels(int argc, char **argv);
 void setup_zernike(void);
 void cleanup_zernike(void);
 void compute_centroid_offset_rho_theta(void);
+void compute_offsets_from_zernike(float *a, float *x, float *y);
 int zernike_to_dm(void);
 int increment_zernike(int J, float delta);
 int set_zernike(int J, float value);

@@ -126,22 +126,25 @@ int open_labao_tiptilt_data_socket(char *wfs_name)
 	if ((sock = socket_manager_get_process(wfs_name, &process)) != 0) 
         {
 		labao_tiptilt_data_socket = -1;
-		return error(ERROR,"Process %s does not seem to exist (%d).",
+		message(system_window,"Process %s does not seem to exist (%d).",
 			wfs_name, sock);
+		return ERROR;
         }
 
         /* First see if we can identify the host. */
 
         if((hp = gethostbyname(process.machine)) == 0)
         {
-                return error(ERROR,"Host %s unknown.",process.machine);
+                message(system_window,"Host %s unknown.",process.machine);
+		return ERROR;
         }
 
         /* Create a socket */
 
         if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0)
         {
-                return error(ERROR,"Failed to create socket.");
+                message(system_window,"Failed to create socket.");
+		return ERROR;
         }
 
         /* Force things to time out after 5 seconds */
@@ -153,14 +156,16 @@ int open_labao_tiptilt_data_socket(char *wfs_name)
                 (char *)&timeout, sizeof(timeout)) < 0)
         {
                 close(sock);
-                return error(ERROR,"Failed to change receive time out\n");
+                message(system_window,"Failed to change receive time out\n");
+		return ERROR;
         }
 
         if (setsockopt(sock , SOL_SOCKET, SO_SNDTIMEO,
                 (char *)&timeout, sizeof(timeout)) < 0)
         {
                 close(sock);
-                return error(ERROR,"Failed to change send time out\n");
+                message(system_window,"Failed to change send time out\n");
+		return ERROR;
         }
 
 	/* Disable Nangles */
@@ -170,7 +175,8 @@ int open_labao_tiptilt_data_socket(char *wfs_name)
 		(char *)&nagle, sizeof(nagle) ))
 	{
 		close(sock);
-		return error(ERROR,"Failed to turn off Nagle\n");
+		message(system_window,"Failed to turn off Nagle\n");
+		return ERROR;
 	}
 
         /* Create server address */
@@ -184,9 +190,9 @@ int open_labao_tiptilt_data_socket(char *wfs_name)
         if (connect(sock, (struct sockaddr *)&server, sizeof(server)) < 0)
         {
                 close(sock);
-                return error(ERROR,
-                        "Failed to connect to %s port %d.",
+                message(system_window, "Failed to connect to %s port %d.",
 			process.machine, TIPTILT_DATA_PORT);
+		return ERROR;
         }
 
         /* All is well it seems */

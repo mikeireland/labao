@@ -22,6 +22,7 @@
 /* 5.2 - Automated Coude/Dichroic corrections added                     */
 /* 6.0 - No changes but wanted to make the version clearly new.		*/
 /* 6.1 - Added Gail's new reconstructor calculation code.		*/
+/* 7.0 - Trying to make the Zernike stuff make sense.			*/
 /************************************************************************/
 /*                                                                      */
 /*                    CHARA ARRAY USER INTERFACE			*/
@@ -94,7 +95,7 @@ int main(int argc, char **argv)
                                   break;
 
 			case 'j': if (sscanf(p+1,"%d",&maxJ) != 1 ||
-					maxJ < 21 || maxJ > NUM_LENSLETS)
+					maxJ < 3 || maxJ > NUM_LENSLETS)
                                   {
                                     print_usage_message(name);
                                     exit(-1);
@@ -156,7 +157,7 @@ int main(int argc, char **argv)
 	ui_clear_screen();
 	put_line("");
 
-	sprintf(title,"%s 6.1",labao_name);
+	sprintf(title,"%s 7.0",labao_name);
 	center_line(title);
 	put_line("");
 	center_line("The CHARA Array");
@@ -212,6 +213,14 @@ int main(int argc, char **argv)
 
 void labao_open(void) 
 {
+	/* Open display */
+
+	if (initX(NULL) < 0) error(ERROR,"Failed to open X windows display.");
+
+	/* Initialize the zernike stuff */
+
+	setup_zernike();
+
 	/* Setup the astromod with default values */
 
         astromod_init(NULL, NULL);
@@ -249,10 +258,6 @@ void labao_open(void)
 
 	call_load_reconstructor(0,NULL);
 
-	/* Initialize the zernike stuff */
-
-	setup_zernike();
-
 	/* Set the USB callback function */
 
 	set_usb_camera_callback(run_centroids_and_fsm);
@@ -279,10 +284,6 @@ void labao_open(void)
 	/* Try and open the tiptilt comms */
 
 	call_open_labao_tiptilt_data_socket(0, NULL);
-
-	/* Open display */
-
-	if (initX(NULL) < 0) error(ERROR,"Failed to open X windows display.");
 
 }
 

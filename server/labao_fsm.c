@@ -166,6 +166,7 @@ float avg_fluxes[NUM_LENSLETS];
 struct s_labao_wfs_results wfs_results;
 float fsm_reconstructor[NUM_ACTUATORS][2*NUM_LENSLETS];
 float zernike_reconstructor[NUM_ACTUATORS][2*NUM_LENSLETS];
+float calculated_zernike[NUM_ACTUATORS]; /* Starts at 0 not 1 */
 float fsm_actuator_to_sensor[NUM_ACTUATORS][2*NUM_LENSLETS];
 float x_mean_offset=0.0, y_mean_offset=0.0, max_offset=1.0, min_doffset = 0.0;
 float *fsm_flat_dm;
@@ -205,9 +206,11 @@ void initialize_fsm(void)
 
 	for (i=0; i<NUM_ACTUATORS; i++)
 	{
+	    calculated_zernike[i] = 0;
 	    for (j=0; j<2*NUM_LENSLETS; j++)
 	    {
 		fsm_reconstructor[i][j]=0.0; 
+		zernike_reconstructor[i][j]=0.0; 
 		fsm_actuator_to_sensor[i][j]=0.0;
 	    }
 	    for (j=0; j<NUM_ABERRATIONS; j++)
@@ -263,10 +266,8 @@ void initialize_fsm(void)
 
 void compute_pupil_center(void)
 {
-	int i;
+	int i,j ;
 	float x_offset, y_offset, offset;
-
-	pthread_mutex_lock(&fsm_mutex);
 
 	/* Initialize variables */
 
@@ -303,7 +304,7 @@ void compute_pupil_center(void)
 	min_doffset = 1e32;
 	for(i=0; i<NUM_LENSLETS-1; i++)
 	{
-	    for(j=1; j<NUM_LENSLETS; j++)
+	    for(j=i+1; j<NUM_LENSLETS; j++)
 	    {
 		x_offset = x_centroid_offsets[i] - x_centroid_offsets[j];
 		y_offset = y_centroid_offsets[i] - y_centroid_offsets[j];
@@ -315,8 +316,6 @@ void compute_pupil_center(void)
 	/* This will change the Rho and Theta of these subapertures */
 
 	compute_centroid_offset_rho_theta();
-
-	pthread_mutex_unlock(&fsm_mutex);
 
 } /* compute_pupil_center() */
 
@@ -1048,6 +1047,19 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 				(1-FLUX_DAMPING) + FLUX_DAMPING*avg_fluxes[l];
 	}
 	pthread_mutex_unlock(&fsm_mutex);
+
+	/* Compute the Zernike terms */
+
+	for (i=0;i<NUM_ACTUATORS;i++)
+	{
+	    calculated_zernike[i] = 0.0;
+	    for (l=0;l<NUM_LENSLETS;l++)
+	    {
+		calculated_zernike[i] += 
+			(zernike_reconstructor[i][l] * new_xc[l] +
+			zernike_reconstructor[i][NUM_LENSLETS+l] * new_yc[l]);
+	    }
+	}
 
 	/* Compute the tiptilt, focus, astigmatism, and coma terms */
 
@@ -1868,8 +1880,8 @@ int fsm_status(void)
 					"Lab Autoalignment is complete.");
 				send_labao_text_message("%s", 
 					"Lab Autoalignment is complete.");
-				use_reference_off();
 				pthread_mutex_unlock(&fsm_mutex);
+				use_reference_off();
 				return NOERROR;
 			}
 
@@ -1883,8 +1895,8 @@ int fsm_status(void)
 					"Giving up on lab autoalignment.");
 				send_labao_text_message("%s",
 					"Giving up on lab autoalignment.");
-				use_reference_off();
 				pthread_mutex_unlock(&fsm_mutex);
+				use_reference_off();
 				return NOERROR;
 			}
 
@@ -3736,6 +3748,7 @@ int compute_reconstructor_new(int argc, char **argv)
 	int num_modes;
 	int i, j, k;
 	char in_filename[256], out_filename[256], s[256];
+	bool	found_nan = FALSE;
 
 	/* Setup the defaults */
 
@@ -3923,12 +3936,24 @@ int compute_reconstructor_new(int argc, char **argv)
 	/* Shift indices from [1...n] to [0...n-1]         */
 
 	for (i=0; i<NUM_ACTUATORS; i++)
+	{
 	  for (j=0; j<2*NUM_LENSLETS; j++)
-	    fsm_reconstructor[i][j] = a_inverse[i+1][j+1];
+	  {
+	    if (isnan(a_inverse[i+1][j+1]))
+	    {	
+		found_nan = TRUE;
+	    	fsm_reconstructor[i][j] = 0.0;
+	    }
+	    else
+	    {
+	    	fsm_reconstructor[i][j] = a_inverse[i+1][j+1];
+	    }
+	  }
+	}
 
 	/* Save the reconstructor matrix */
 
-	if (save_reconstructor_new(out_filename))
+	if (!found_nan && save_reconstructor_new(out_filename))
 		return error(ERROR,
 			"Problems loading the temporary reconstructor file.");
 
@@ -3939,8 +3964,11 @@ int compute_reconstructor_new(int argc, char **argv)
 	free_vector(v_eigenvalue,1,NUM_ACTUATORS);
 	free_vector(offdiag_v,1,2*NUM_LENSLETS);
 
-	message(system_window,"New reconstructor saved in %s", out_filename);
-
+	if (found_nan)
+	   message(system_window,"New reconstructor contains NAN!");
+	else
+	   message(system_window,"New reconstructor saved in %s", out_filename);
+	
 	return NOERROR;	
 
 } /* compute_reconstructor_new() */
