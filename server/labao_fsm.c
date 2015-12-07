@@ -459,14 +459,6 @@ int load_defaults(char* filename_in)
                 return -11;
         }
 
-	/* Set a flat wavefront. */
-	
-	if (flatten_wavefront()) return -9;
-
-	/* Tell clients */
-
-	send_labao_value_all_channels(TRUE);
-
 	/* 
   	 * Try to set the AOI.
 	 * This was moved so that even if the camera isn't there
@@ -474,6 +466,14 @@ int load_defaults(char* filename_in)
 	 */
 
 	if (set_usb_camera_aoi(FALSE, x, y, dx, dy)) return -5;
+
+	/* Set a flat wavefront. */
+	
+	if (flatten_wavefront()) return -9;
+
+	/* Tell clients */
+
+	send_labao_value_all_channels(TRUE);
 
 	fclose(params_file);
 

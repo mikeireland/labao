@@ -151,11 +151,12 @@ int open_usb_camera(void)
 	/* 
   	 * Open the camera... should be in the same thread as 
   	 * SetDisplayMode() and ExitCamera()
-  	 * We may have to do tricky things with is_SetCameraID when we
+  	 * We did have to do tricky things with is_SetCameraID when we
   	 * have more than one camera.
  	 */
 
-	cam_pointer = (HIDS)0x1; /* With luck, this is the right camera */
+	cam_pointer = (HIDS)(camera_id[this_labao]); 
+
 	if ((i = is_InitCamera(&cam_pointer, &cam_window)))
 	{
 		return error(ERROR,
@@ -2521,3 +2522,35 @@ int set_image_threshold(int argc, char **argv)
 	return NOERROR;
 
 } /* set_image_threshold() */
+
+/************************************************************************/
+/* set_camera_id()							*/
+/*									*/
+/* Set camera ID. Note, you should only have one camera attached, 	*/
+/* and the default ID is 1.						*/
+/************************************************************************/
+
+int set_camera_id(int argc, char **argv)
+{
+	char	s[100];
+	int	id;
+	int	ret;
+
+	if (argc > 1)
+	{
+		sscanf(argv[1],"%d",&id);
+	}
+	else
+	{
+		clean_command_line();
+		sprintf(s,"    %d", 1);
+		if (quick_edit("Camera ID",
+			s,s,NULL,INTEGER) == KEY_ESC) return NOERROR;
+		sscanf(s,"%d",&id);
+	}
+
+  	ret = is_SetCameraID(cam_pointer, id);
+	message(system_window, "Camera ID set to %d return %d", id, ret);
+	return NOERROR;
+
+} /* set_camera_id() */

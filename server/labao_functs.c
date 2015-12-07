@@ -103,6 +103,8 @@ struct {
 		{"nframe",	call_set_num_sum_frame},
 		{"sthresh",	set_image_threshold},
 		{"thresh",	set_image_threshold},
+		{"sci",		set_camera_id},
+		{"sid",		set_camera_id},
 
 		/* Function set for finite state machine */
 

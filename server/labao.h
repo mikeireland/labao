@@ -87,6 +87,7 @@
 extern char labao_name[80];
 extern char default_display[256];
 extern char *dac40_mac_address[NUM_SCOPES];
+extern int camera_id[NUM_SCOPES];
 extern int this_labao;
 extern int maxJ;
 extern int fsm_state;
@@ -281,6 +282,7 @@ bool usb_cammera_is_running(void);
 int set_num_sum_frame(int num);
 int call_set_num_sum_frame(int argc, char **argv);
 int set_image_threshold(int argc, char **argv);
+int set_camera_id(int argc, char **argv);
 
 /* labso_fsm.c */
 

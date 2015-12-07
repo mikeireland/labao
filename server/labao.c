@@ -60,6 +60,13 @@ char *dac40_mac_address[NUM_SCOPES] =
 		 "Undefined", /* E2 */
 		 "Undefined", /* W1 */
 		 "Undefined"}; /* W2 */
+int camera_id[NUM_SCOPES] =
+		{ 0x2,  /* S1 */
+		  0x1,  /* S2 */
+		  0x3,  /* E1 */
+		  0x4,  /* E2 */
+		  0x5,  /* W1 */
+		  0x6}; /* W2 */
 int this_labao;
 int maxJ = DEFAULT_MAXJ;
 struct s_labao_usb_camera usb_camera;
