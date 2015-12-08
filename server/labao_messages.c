@@ -345,7 +345,7 @@ int message_labao_run_function(struct smessage *message)
 		case LABAO_MEASURE_RECONSTRUCTOR:
 			return  call_measure_reconstructor(0, NULL);
 		case LABAO_COMPUTE_RECONSTRUCTOR:
-			return  compute_reconstructor(0, NULL);
+			return  compute_reconstructor_new(0, NULL);
 		case LABAO_SAVE_RECONSTRUCTOR:
 			return  save_reconstructor(0, NULL);
 		case LABAO_SET_FLAT_DM:

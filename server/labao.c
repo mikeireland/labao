@@ -23,6 +23,7 @@
 /* 6.0 - No changes but wanted to make the version clearly new.		*/
 /* 6.1 - Added Gail's new reconstructor calculation code.		*/
 /* 7.0 - Trying to make the Zernike stuff make sense.			*/
+/* 7.1 - I did not work.			*/
 /************************************************************************/
 /*                                                                      */
 /*                    CHARA ARRAY USER INTERFACE			*/
@@ -164,7 +165,7 @@ int main(int argc, char **argv)
 	ui_clear_screen();
 	put_line("");
 
-	sprintf(title,"%s 7.0",labao_name);
+	sprintf(title,"%s 7.1",labao_name);
 	center_line(title);
 	put_line("");
 	center_line("The CHARA Array");

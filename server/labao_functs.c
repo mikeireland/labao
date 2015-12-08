@@ -78,6 +78,7 @@ struct {
 		{"zzern",	reset_all_zernike},
 		{"szern",	call_save_zernike},
 		{"lzern",	call_load_zernike},
+		{"nz2dm",	call_new_zernike_to_dm},
 
 		/* Function set for USB camera */
 

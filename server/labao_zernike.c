@@ -33,7 +33,23 @@
 #define TEST_ZERNIKE_1_DELAY  250000
 //#define TEST_ZERNIKE_2
 
+/* Where is each actuator? */
+
+static float actuator_x[NUM_ACTUATORS+1] = {0, /* Numbering starts from 1 */
+        0.0, -1, -0.5, 0.5, 1.0, 0.5, -0.5,
+        -2, -1.5, -1.0, 0.0, 1.0, 1.5, 2.0, 1.5, 1.0, 0.0, -1.0, -1.5,
+        -3.0, -2.5, -2.0, -1.5, -0.5, 0.5, 1.5, 2.0, 2.5, 3.0, 2.5,
+        2.0, 1.5, 0.5 ,-0.5, -1.5, -2.0, -2.5};
+
+static float actuator_y[NUM_ACTUATORS+1] = {0, /* Numbering starts from 1 */
+        0, 0, 1, 1, 0, -1,-1, 0, 1, 2, 2, 2, 1, 0, -1, -2, -2, -2, -1,
+        0, 1, 2, 3, 3, 3, 3, 2, 1, 0, -1, -2, -3, -3, -3, -3, -2, -1};
+
+static float *actuator_zernike_values[NUM_ACTUATORS+1];
+
 static float *zernike_values;
+
+static float zernike_min, zernike_max;
 
 static pthread_mutex_t zernike_mutex = PTHREAD_MUTEX_INITIALIZER;
 static float rho[NUM_LENSLETS];
@@ -49,16 +65,53 @@ static float theta[NUM_LENSLETS];
 
 void setup_zernike(void)
 {
-	int	j;
+	int	i, j;
+	float	rho, theta;
 
         /* Make the mutex so this will be thread safe */
 
         if (pthread_mutex_init(&zernike_mutex, NULL) != 0)
                 error(FATAL, "Unable to create Zernike mutex.");
 
+	/* Normalize the x and y */
+
+        for (i=1; i<= NUM_ACTUATORS; i++)
+        {
+                actuator_x[i] /= 3.0;
+                actuator_y[i] *= (sqrt(0.75)/3.0);
+        }
+
 	/* Setup the zernike stuff */
 
 	set_up_zernike_calcs(maxJ);
+
+	/* Allocate memory iand fill things in */
+
+        actuator_zernike_values[0] = NULL;
+        zernike_max = -1e32;
+        zernike_min = 1e32;
+        for (i=1; i<= NUM_ACTUATORS; i++)
+        {
+                actuator_zernike_values[i]=malloc(sizeof(float)*(maxJ+1));
+                if (actuator_zernike_values[i] == NULL)
+                        error(FATAL, "Not enough memory.");
+
+                rho = sqrt(actuator_x[i]*actuator_x[i] +
+                           actuator_y[i]*actuator_y[i]);
+                if (rho > 1.0) rho = 1.0;
+
+                theta = atan2(actuator_y[i], actuator_x[i]);
+                if (theta < 0.0) theta += (2.0*M_PI);
+
+                for(j=1; j<= maxJ; j++)
+                {
+                        actuator_zernike_values[i][j] = zernike(j,rho,theta);
+                        if (actuator_zernike_values[i][j] > zernike_max)
+                                zernike_max = actuator_zernike_values[i][j];
+                        else if (actuator_zernike_values[i][j] < zernike_min)
+                                zernike_min = actuator_zernike_values[i][j];
+                }
+        }
 
 	/* Now we allocate the first version of the zernike values */
 
@@ -304,7 +357,44 @@ void compute_offsets_from_zernike(float *a, float *x, float *y)
 } /* compute_centroid_offset_rho_theta() */
 
 /************************************************************************/
-/* zernike_to_dm()							*/
+/* zernike_to_dm()                                                      */
+/*                                                                      */
+/* Work out current DAC positions and DM positions for current          */
+/* value of Zernike coefficients.                                       */
+/* Returns 0 if all goes well.                                          */
+/* -1 if DAC fails.                                                     */
+/************************************************************************/
+
+int zernike_to_dm(void)
+{
+        float   *values;
+        int     i, j;
+
+        values = vector(1, NUM_ACTUATORS);
+
+        pthread_mutex_lock(&zernike_mutex);
+        for(i=1; i<= NUM_ACTUATORS; i++)
+        {
+                values[i] = 0.0;
+
+                for(j=1; j <= maxJ; j++)
+                {
+                        values[i] += (zernike_values[j] *
+                                actuator_zernike_values[i][j]);
+                }
+        }
+        pthread_mutex_unlock(&zernike_mutex);
+
+        if (edac40_set_all_channels(values) < 0) return -1;
+
+        free_vector(values, 1, NUM_ACTUATORS);
+
+        return 0;
+
+} /* zernike_to_dm() */
+
+/************************************************************************/
+/* new_zernike_to_dm()							*/
 /*									*/
 /* Work out current DAC positions and DM positions for current		*/
 /* value of Zernike coefficients.					*/
@@ -312,7 +402,7 @@ void compute_offsets_from_zernike(float *a, float *x, float *y)
 /* -1 if DAC fails.							*/
 /************************************************************************/
 
-int zernike_to_dm(void)
+int new_zernike_to_dm(void)
 {
 	float	*values;
 	int	i, j;
@@ -376,10 +466,25 @@ int zernike_to_dm(void)
 
 	return 0;
 
-} /* zernike_to_dm() */
+} /* new_zernike_to_dm() */
 
 /************************************************************************/
-/* increment_zernike()							*/ /* 									*/
+/* call_new_zernike_to_dm()						*/
+/*									*/
+/* User callable version.						*/
+/************************************************************************/
+
+int call_new_zernike_to_dm(int argc, char **argv)
+{
+	zernike_to_dm();
+
+	return NOERROR;
+
+} /* call_new_zernike_to_dm() */
+
+/************************************************************************/
+/* increment_zernike()							*/
+/* 									*/
 /* Incriment a sinlge zernike mode by a given amount.			*/
 /* Returns:								*/
 /* 0 - If all goes well.						*/

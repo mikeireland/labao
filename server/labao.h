@@ -231,6 +231,8 @@ void cleanup_zernike(void);
 void compute_centroid_offset_rho_theta(void);
 void compute_offsets_from_zernike(float *a, float *x, float *y);
 int zernike_to_dm(void);
+int new_zernike_to_dm(void);
+int call_new_zernike_to_dm(int argc, char **argv);
 int increment_zernike(int J, float delta);
 int set_zernike(int J, float value);
 int set_all_zernike(float *values);

@@ -2362,10 +2362,10 @@ int set_flat_dm(void)
                 send_labao_text_message("Waiting for new mean DM %d",
                         (int)time(NULL) - start);
         }
+        for (i=0;i<NUM_ACTUATORS;i++) fsm_flat_dm[i] = fsm_mean_dm[i];
+
         message(system_window,"New DM flat set");
         send_labao_text_message("New DM flat set");
-
-        for (i=0;i<NUM_ACTUATORS;i++) fsm_flat_dm[i] = fsm_mean_dm[i];
 
 	return NOERROR;
 
