@@ -142,6 +142,7 @@ struct {
 		{"sdich",	stop_autoalign},
 		{"esp",		edit_servo_parameters},
 		{"move",	move_boxes},
+		{"expand",	expand_boxes},
 		{"ezc",		edit_zero_clamp},
 		{"zero",	edit_zero_clamp},
 		{"edc",		edit_denom_clamp},

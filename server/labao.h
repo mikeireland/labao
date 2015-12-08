@@ -329,6 +329,7 @@ int start_autoalign_zernike(int argc, char **argv);
 int stop_autoalign(int argc, char **argv);
 int edit_servo_parameters(int argc, char **argv);
 int move_boxes(int argc, char **argv);
+int expand_boxes(int argc, char **argv);
 void move_centroids(float dx, float dy);
 int edit_zero_clamp(int argc, char **argv);
 int edit_denom_clamp(int argc, char **argv);

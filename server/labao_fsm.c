@@ -2974,6 +2974,65 @@ int move_boxes(int argc, char **argv)
 } /* move_boxes() */
 
 /************************************************************************/
+/* expand_boxes()							*/
+/*									*/
+/* Expand centroid boxes by a small amount.				*/
+/************************************************************************/
+
+int expand_boxes(int argc, char **argv)
+{
+        char    s[100];
+	int i;
+	float	factor,x_mean_offset, y_mean_offset; 
+
+	/* Initialize variables */
+
+	x_mean_offset = 0.0;
+	y_mean_offset = 0.0;
+
+        /* Check out the command line */
+
+        if (argc > 1)
+        {
+                sscanf(argv[1],"%f",&factor);
+        }
+        else
+        {
+                clean_command_line();
+                sprintf(s,"%9.2f", 0.1);
+                if (quick_edit("factor",s,s,NULL,FLOAT)
+                   == KEY_ESC) return NOERROR;
+                sscanf(s,"%f",&factor);
+        }
+
+	/* To compute expansion, we need the current pupil center. */
+
+	for (i=0;i<NUM_LENSLETS;i++)
+	{
+		x_mean_offset += x_centroid_offsets[i];
+		y_mean_offset += y_centroid_offsets[i];
+	}
+	x_mean_offset /= NUM_LENSLETS;
+	y_mean_offset /= NUM_LENSLETS;
+	
+	for (i=0;i<NUM_LENSLETS;i++)
+        {
+                x_centroid_offsets_beacon[i] = x_mean_offset + factor*(x_centroid_offsets_beacon[i] - x_mean_offset);
+		y_centroid_offsets_beacon[i] = y_mean_offset + factor*(y_centroid_offsets_beacon[i] - y_mean_offset);
+		x_centroid_offsets_reference[i] = x_mean_offset + factor*(x_centroid_offsets_reference[i] - x_mean_offset);
+		y_centroid_offsets_reference[i] = y_mean_offset + factor*(y_centroid_offsets_reference[i] - y_mean_offset);
+        }
+
+
+	compute_pupil_center();
+        
+
+	return NOERROR;
+
+} /* move_boxes() */
+
+
+/************************************************************************/
 /* move_centroids()                                                     */
 /*                                                                      */
 /* Move centroid boxes by a small amount.                               */
