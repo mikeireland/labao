@@ -46,7 +46,7 @@
 #define ZERNIKE_ALIGN_STEP	0.005
 #define BEACON_FOCUS_LIMIT 	0.05
 #define BEACON_FOCUS_STEP  	10000
-#define BEACON_FOCUS_GAIN   	500000
+#define BEACON_FOCUS_GAIN   	100000
 
 /* Optionally enforce zero piston. With SERVO_DAMPING < 1 and a reasonable reconstructor,
    this shouldn't be needed */
@@ -2199,7 +2199,7 @@ int fsm_status(void)
 			last_time = time(NULL);
 		}
 
-		if (autoalign_beacon_focus && time(NULL) > last_time+2)
+		if (autoalign_beacon_focus && time(NULL) > last_time+3)
 		{
 		    /* Is it done? */
         
@@ -2241,16 +2241,12 @@ int fsm_status(void)
 		    motor_move.position = BEACON_FOCUS_STEP + 
 			  (int)(fabs(wfs_results.focus)*BEACON_FOCUS_GAIN);
 
-		    if (wfs_results.focus < 0)
-		    {
-			motor_move.position *= 1.0;
-			    strcat(s," Moving RIGHT");
-		    }
+		    if (wfs_results.focus < 0) motor_move.position *= -1.0;
 		    send_message(telescope_server, &mess);
 
 		    /* Tell the user */
 
-		    sprintf(s, "Tries = %d Focus = %.2f - %d", 
+		    sprintf(s, "Tries = %d Focus = %.2f Move = %d", 
 			autoalign_count+1, wfs_results.focus, 
 			motor_move.position);
 		   message(system_window,s);
@@ -2927,6 +2923,7 @@ int stop_autoalign(int argc, char **argv)
 	if (open_telescope_connection(0, NULL) != NOERROR) return ERROR;
 
 	message(system_window, "Auto alignment has been stopped.");
+        send_labao_text_message("Auto alignment has been stopped.");
 
 	return NOERROR;
 
