@@ -139,6 +139,7 @@ struct {
 		{"alab",	start_autoalign_lab_dichroic},
 		{"ascope",	start_autoalign_scope_dichroic},
 		{"azern",	start_autoalign_zernike},
+		{"afoc",	start_autoalign_beacon_focus},
 		{"sdich",	stop_autoalign},
 		{"esp",		edit_servo_parameters},
 		{"move",	move_boxes},

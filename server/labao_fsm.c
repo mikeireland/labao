@@ -44,6 +44,9 @@
 #define SCOPE_ALIGN_GAIN	300
 #define ZERNIKE_ALIGN_LIMIT	0.075
 #define ZERNIKE_ALIGN_STEP	0.005
+#define BEACON_FOCUS_LIMIT 	0.05
+#define BEACON_FOCUS_STEP  	10000
+#define BEACON_FOCUS_GAIN   	500000
 
 /* Optionally enforce zero piston. With SERVO_DAMPING < 1 and a reasonable reconstructor,
    this shouldn't be needed */
@@ -115,6 +118,7 @@ static int wfs_results_num = ((int)DEFAULT_FRAME_RATE);
 static int wfs_results_n = 0;
 static bool autoalign_lab_dichroic = FALSE;
 static bool autoalign_scope_dichroic = FALSE;
+static bool autoalign_beacon_focus = FALSE;
 
 static bool scope_dichroic_mapping = FALSE;
 static float target_telescope_az = 90.0;
@@ -2195,6 +2199,68 @@ int fsm_status(void)
 			last_time = time(NULL);
 		}
 
+		if (autoalign_beacon_focus && time(NULL) > last_time+2)
+		{
+		    /* Is it done? */
+        
+		    if (fabs(wfs_results.focus) < BEACON_FOCUS_LIMIT)
+		    {
+			autoalign_beacon_focus = FALSE;
+			autoalign_count = 0;
+			message(system_window,
+				"Beacon Focus Autoalignment is complete.");
+			send_labao_text_message("%s", 
+				"Beacon Focus Autoalignment is complete.");
+			pthread_mutex_unlock(&fsm_mutex);
+			return NOERROR;
+		    }
+
+		    /* Have we tried too many times? */
+
+		    if (--autoalign_count < 0)
+		    {
+			autoalign_beacon_focus = FALSE;
+			autoalign_count = 0;
+			message(system_window,
+				"Giving up on beacon focus autoalignment.");
+			send_labao_text_message("%s",
+				"Giving up on beacon focus autoalignment.");
+			pthread_mutex_unlock(&fsm_mutex);
+			return NOERROR;
+		    }
+
+		    /* OK, move things in appropriate ways */
+
+		    mess.type = HUT_AOB_MOVE_RELATIVE;
+		    mess.length = sizeof(motor_move);
+		    mess.data = (unsigned char *)&motor_move;
+		    if (this_labao == S2)
+			  motor_move.motor = AOB_S2_BEACON_FOC;
+		    else
+			  motor_move.motor = AOB_BEACON_FOC;
+		    motor_move.position = BEACON_FOCUS_STEP + 
+			  (int)(fabs(wfs_results.focus)*BEACON_FOCUS_GAIN);
+
+		    if (wfs_results.focus < 0)
+		    {
+			motor_move.position *= 1.0;
+			    strcat(s," Moving RIGHT");
+		    }
+		    send_message(telescope_server, &mess);
+
+		    /* Tell the user */
+
+		    sprintf(s, "Tries = %d Focus = %.2f - %d", 
+			autoalign_count+1, wfs_results.focus, 
+			motor_move.position);
+		   message(system_window,s);
+		   send_labao_text_message("%s", s);
+
+		   /* OK, this is now done */
+
+		   last_time = time(NULL);
+		}
+
 		/* Now output these variables to the status window */
 
 		wstandout(status_window);
@@ -2581,7 +2647,8 @@ int start_autoalign_lab_dichroic(int argc, char **argv)
 	struct smessage mess;
 	time_t	start;
 
-	if (autoalign_scope_dichroic || autoalign_zernike)
+	if (autoalign_scope_dichroic || autoalign_zernike || 
+		autoalign_beacon_focus)
 		return error(ERROR,"Already running Auto Alignment.");
 
         /* Check out the command line */
@@ -2682,7 +2749,8 @@ int start_autoalign_scope_dichroic(int argc, char **argv)
 	struct smessage mess;
         struct s_aob_move_motor motor_move;
 
-	if (autoalign_lab_dichroic || autoalign_zernike)
+	if (autoalign_lab_dichroic || autoalign_zernike ||
+		autoalign_beacon_focus)
 		return error(ERROR,"Already running Auto Alignment.");
 
         /* Check out the command line */
@@ -2765,7 +2833,8 @@ int start_autoalign_zernike(int argc, char **argv)
 {
         char    s[100];
 
-	if (autoalign_lab_dichroic || autoalign_scope_dichroic)
+	if (autoalign_lab_dichroic || autoalign_scope_dichroic ||
+		autoalign_beacon_focus)
 		return error(ERROR,"Already running Auto Alignment.");
 
         /* Check out the command line */
@@ -2796,6 +2865,46 @@ int start_autoalign_zernike(int argc, char **argv)
 } /* start_autoalign_zernike() */
 
 /************************************************************************/
+/* start_autoalign_beacon_focus()					*/
+/*									*/
+/* Starts the beacon focus alignment routine.				*/
+/************************************************************************/
+
+int start_autoalign_beacon_focus(int argc, char **argv)
+{
+        char    s[100];
+
+	if (autoalign_lab_dichroic || autoalign_scope_dichroic ||
+		autoalign_beacon_focus)
+		return error(ERROR,"Already running Auto Alignment.");
+
+        /* Check out the command line */
+
+        if (argc > 1)
+        {
+                sscanf(argv[1],"%d",&autoalign_count);
+        }
+        else
+        {
+                clean_command_line();
+                sprintf(s,"%9d", DEFAULT_AUTOALIGN_COUNT);
+                if (quick_edit("Maximum number of steps",s,s,NULL,INTEGER)
+                   == KEY_ESC) return NOERROR;
+                sscanf(s,"%d",&autoalign_count);
+	} 
+
+	message(system_window,"Beacon focus autoalignment begins Trys = %d",
+		autoalign_count);
+
+	fsm_state = FSM_CENTROIDS_ONLY;
+	use_reference_off();
+	autoalign_beacon_focus = TRUE;
+
+	return NOERROR;
+
+} /* start_autoalign_beacon_focus() */
+
+/************************************************************************/
 /* stop_autoalign()							*/
 /*									*/
 /* Stops the Dichroic Automated alignment routine.			*/
@@ -2806,6 +2915,7 @@ int stop_autoalign(int argc, char **argv)
 	autoalign_lab_dichroic = FALSE;
 	autoalign_scope_dichroic = FALSE;
 	autoalign_zernike = FALSE;
+	autoalign_beacon_focus = FALSE;
 	use_reference_off();
         if (scope_dichroic_mapping)
 	{
@@ -2813,6 +2923,8 @@ int stop_autoalign(int argc, char **argv)
 	    scope_dichroic_mapping = FALSE;
 	    fclose(scope_dichroic_mapping_file);
 	}
+
+	if (open_telescope_connection(0, NULL) != NOERROR) return ERROR;
 
 	message(system_window, "Auto alignment has been stopped.");
 
