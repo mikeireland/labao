@@ -67,6 +67,7 @@ int main(int argc, char **argv)
 	float	theta[MAX_DATA];
 	float	x[MAX_DATA];
 	float	y[MAX_DATA];
+	float dx,dy;
 	float	x_off, x_amp, x_phase;
 	float	y_off, y_amp, y_phase;
 	float	temp;
@@ -119,10 +120,16 @@ int main(int argc, char **argv)
 	/* Read in the data and doit */
 
 	ndata = 0;
+	x[0]=0;
+	y[0]=0;
 	while(fgets(s,256,input) != NULL)
 	{
 		if (sscanf(s,"%f %f %f %f",
-			&temp, theta+ndata,x+ndata,y+ndata) != 4) continue;
+			&temp, theta+ndata,&dx,&dy) != 4) continue;
+		if (ndata > 0){
+			x[ndata] = x[ndata-1] + dx;
+			y[ndata] = y[ndata-1] + dy;
+		}
 		theta[ndata] *= (M_PI/180.0);
 		if (++ndata > MAX_DATA) break;
 	}

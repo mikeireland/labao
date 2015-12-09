@@ -127,8 +127,8 @@ FILE *scope_dichroic_mapping_file;
 static int current_total_flux = 0;
 static bool autoalign_zernike = FALSE;
 static int autoalign_count = 0;
-static float autoalign_x_total = 0.0;
-static float autoalign_y_total = 0.0;
+static int autoalign_x_total = 0;
+static int autoalign_y_total = 0;
 static float zero_clamp = ZERO_CLAMP;
 static float denom_clamp = DENOM_CLAMP;
 static bool set_center = FALSE;
@@ -1803,7 +1803,7 @@ int fsm_status(void)
 		{
 		    /* Write out the autoalign total from the last alignment */
 	
-		    fprintf(scope_dichroic_mapping_file,"1 %5.1f %6.2f %6.2f\n",
+		    fprintf(scope_dichroic_mapping_file,"1 %5.1f %8d %8d\n",
 			    telescope_status.az, autoalign_x_total,
 			    autoalign_y_total);
 		    fflush(scope_dichroic_mapping_file);
@@ -1822,7 +1822,7 @@ int fsm_status(void)
 	    }
 		
 	    if ( (scope_dichroic_mapping_step == DICHROIC_MAPPING_ROTATE) && 
-	         (fabs(telescope_status.az - target_telescope_az)<0.1))
+	         (fabs(fmod(telescope_status.az - target_telescope_az+180+360,360)-180)<0.1) )
 	    {
 		/* 
  		 * This is only a rough sanity check... !!!
@@ -2001,7 +2001,7 @@ int fsm_status(void)
 					"Giving up on scope autoalignment.");
 			}
 			fprintf(scope_dichroic_mapping_file,
-			    "0 %5.1f %6.2f %6.2f\n", 
+			    "0 %5.1f %8d %8d\n", 
 			    telescope_status.az, autoalign_x_total, 
 			    autoalign_y_total);
 			fflush(scope_dichroic_mapping_file);
@@ -2535,7 +2535,7 @@ int start_scope_dichroic_mapping(int argc, char **argv)
 	/* Sanity check here so we don't get ourselves stuck. */
 
 	if (scope_dichroic_mapping) return error(ERROR,
-		"Already mapping the scope dichroic positions.");
+		"Already mapping the scope dichroic positions. stopmap to stop.");
 
 	/* Make sure we start off close to 0 azimuth */
 
@@ -2702,7 +2702,8 @@ int start_autoalign_scope_dichroic(int argc, char **argv)
 
 	if (open_telescope_connection(0, NULL) != NOERROR) return ERROR;
 
-        /* First has there been a large jump? */
+        /* First has there been a large jump? last_coude_correction_az is negative only if
+	there hasn't been any corrections yet. */
 
         if (last_coude_correction_az >= 0.0 && use_coude_dichroic_corrections)
         {
@@ -2745,8 +2746,8 @@ int start_autoalign_scope_dichroic(int argc, char **argv)
 	message(system_window,"Scope autoalignment begins Trys = %d",
 		autoalign_count);
 
-	autoalign_x_total = 0.0;
-	autoalign_y_total = 0.0;
+	autoalign_x_total = 0;
+	autoalign_y_total = 0;
 	use_reference_off();
 	autoalign_scope_dichroic = TRUE;
 
@@ -3030,7 +3031,6 @@ int expand_boxes(int argc, char **argv)
 	return NOERROR;
 
 } /* move_boxes() */
-
 
 /************************************************************************/
 /* move_centroids()                                                     */

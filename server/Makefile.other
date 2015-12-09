@@ -57,6 +57,9 @@ OFILES = labao.o\
 	 labao_usb_camera.o\
 	 labao_fsm.o
 
+fit_dich_map: fit_dich_map.c
+	${CC} -o fit_dich_map fit_dich_map.c ${LCFLAGS} -lnrc -lm
+
 #
 # Cleanup
 #
