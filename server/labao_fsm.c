@@ -3920,7 +3920,7 @@ int compute_reconstructor_new(int argc, char **argv)
 
 	/* Setup the defaults */
 
-	num_modes = 7;
+	num_modes = 12;
 	sprintf(in_filename,"%s%s_actuator_to_sensor.tmp", 
 		get_data_directory(s), labao_name);
 	sprintf(out_filename,"%s%s_reconstructor.tmp", 
@@ -4207,7 +4207,7 @@ int read_actuator_to_sensor(int argc, char **argv)
 	}
 	else
 	{
-		sprintf(filename,"%s%s_actuator_to_sensor.dat",
+		sprintf(filename,"%s%s_actuator_to_sensor.tmp",
                         get_data_directory(s), labao_name);
 	}
 
