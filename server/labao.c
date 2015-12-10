@@ -55,12 +55,14 @@ char title[100];
 char labao_name[80];
 char default_display[256];
 char *dac40_mac_address[NUM_SCOPES] =
-		{"00-1E-C0-BB-6F-BF", /* S1 */
+		/* {"00-1E-C0-BB-6F-BF", 15.13 Originally S1, might be broken */
+		{"00-1E-C0-BB-72-1A", /* 15.07 S1 */
 		 "00-04-A3-13-DA-90", /* S2 */
 		 "Undefined", /* E1 */
 		 "Undefined", /* E2 */
 		 "Undefined", /* W1 */
 		 "Undefined"}; /* W2 */
+
 int camera_id[NUM_SCOPES] =
 		{ 0x2,  /* S1 */
 		  0x1,  /* S2 */

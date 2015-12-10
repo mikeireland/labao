@@ -532,7 +532,7 @@ int call_load_defaults(int argc, char **argv)
 		case -7: return 
 	error(ERROR,"Failed to get interpret positions for flat wavefront.");
 
-		case -8: return error(ERROR,"Offsets too close to edge.");
+		case -8: return error(ERROR,"Boxes are too close to edge.");
 
 		case -9: return error(ERROR,"Failed to send flat to DM.");
 
@@ -2597,7 +2597,7 @@ int start_scope_dichroic_mapping(int argc, char **argv)
 	/* Sanity check here so we don't get ourselves stuck. */
 
 	if (scope_dichroic_mapping) return error(ERROR,
-		"Already mapping the scope dichroic positions. stopmap to stop.");
+	   "Already mapping the scope dichroic positions. stopmap to stop.");
 
 	/* Make sure we start off close to 0 azimuth */
 
@@ -4331,3 +4331,186 @@ int read_actuator_to_aberration(int argc, char **argv)
 	return NOERROR;
 
 } /* read_actuator_to_aberration() */
+
+/************************************************************************/
+/* fit_sin_func()							*/
+/*									*/
+/* ROutine for use in the fitting program.				*/
+/************************************************************************/
+
+void fit_sin_func(float *ftn, float *var, float *param)
+{
+	ftn[1] = 1.0;
+	ftn[2] = sin(param[1] + var[3]);
+	ftn[3] = var[2] * cos(param[1] * var[3]);
+	ftn[0] = var[1] + var[2] * ftn[2];
+}
+
+/************************************************************************/
+/* fit_dichroic_map()							*/
+/*									*/
+/* Fits cosines to the dichroic map to a data set.			*/
+/*									*/
+/************************************************************************/
+
+int fit_dichroic_map(int argc, char **argv)
+{
+	/* Locals */
+
+	FILE	*input;		/* data file */
+	char	s[256];		/* Buffer */
+	char	filename[256];		/* Buffer */
+	register int i;
+	float	rmsres;
+	float	maxres;
+	int	nparam = 1;	/* Motor movement */
+	float	**param = NULL; /* 1..ndata, 1..param */
+	int	ndata = 0;
+	float	*var;		/* 1..nvar, Offset, Amplitude and Phase */
+	float	*fit_data;	/* 1..ndata */
+	int	nvar = 3;
+	float	theta[1000];
+	float	x[1000];
+	float	y[1000];
+	float dx,dy;
+	float	x_off, x_amp, x_phase;
+	float	y_off, y_amp, y_phase;
+	float	temp;
+	
+
+	/* Open the input file */
+
+	if (argc > 1)
+	{
+		strcpy(filename, argv[1]);
+	}
+	else
+	{
+		sprintf(filename,
+			"%s/%s_dich_map.dat", get_data_directory(s),
+			labao_name);
+	}
+
+	/* Open the file */
+
+	if ((input = fopen(filename,"r")) == NULL)
+	{
+		return error(ERROR,"Could not open file %s.\n",filename);
+	}
+
+	/* Read in the data and doit */
+
+	ndata = 0;
+	x[0]=0;
+	y[0]=0;
+	while(fgets(s,256,input) != NULL)
+	{
+		if (sscanf(s,"%f %f %f %f",
+			&temp, theta+ndata,&dx,&dy) != 4) continue;
+		if (ndata > 0){
+			x[ndata] = x[ndata-1] + dx;
+			y[ndata] = y[ndata-1] + dy;
+		}
+		theta[ndata] *= (M_PI/180.0);
+		if (++ndata > 1000) break;
+	}
+	fclose(input);
+
+	message(system_window,"# Number of data points : %d\n\n",ndata);
+
+	/* Allocate the memory */
+
+	var = vector(1, nvar);
+	param = matrix(1, ndata, 1, nparam);
+	fit_data = vector(1, ndata);
+
+	/* Do fit for X including first guess */
+
+	var[1] = 0.0;
+	for(i=0; i<ndata; i++)
+	{
+		param[i+1][1] = theta[i];
+		var[1] += (fit_data[i+1] = x[i]);
+	}
+
+	var[1] /= ndata;
+	var[2] = -1e32;
+	for(i=0; i<ndata; i++)
+	{
+		if (fabs(x[i] - var[1]) > var[2])
+		{
+			var[2] = fabs(x[i] - var[1]);
+			var[3] = theta[i] - M_PI/2.0;
+		}
+	}
+	
+	non_linear_fit(nvar, var, ndata, fit_data, nparam, param, 0,
+		fit_sin_func, &rmsres, &maxres, 2.0, 100, SHOW_NOTHING);
+
+	sprintf(s,"Results of X fit : \n");
+	sprintf(filename, "RMS residue %le\n",rmsres);
+	strcat(s, filename);
+	sprintf(filename, "MAX residue %le\n",maxres);
+	strcat(s, filename);
+	sprintf(filename, "Offset    = %f\n",var[1]);
+	strcat(s, filename);
+	sprintf(filename, "Amplitude = %f\n",var[2]);
+	strcat(s, filename);
+	sprintf(filename, "Phase     = %f",var[3]*180.0/M_PI);
+	strcat(s, filename);
+	error(MESSAGE, s);
+
+	x_off = var[1];
+	x_amp = var[2];
+	x_phase = var[3]*180.0/M_PI;
+
+	/* Do fit for Y including first guess */
+
+	var[1] = 0.0;
+	for(i=0; i<ndata; i++)
+	{
+		param[i+1][1] = theta[i];
+		var[1] += (fit_data[i+1] = y[i]);
+	}
+
+	var[1] /= ndata;
+	var[2] = -1e32;
+	for(i=0; i<ndata; i++)
+	{
+		if (fabs(y[i] - var[1]) > var[2])
+		{
+			var[2] = fabs(y[i] - var[1]);
+			var[3] = theta[i] - M_PI/2.0;
+		}
+	}
+	
+	non_linear_fit(nvar, var, ndata, fit_data, nparam, param, 0,
+		fit_sin_func, &rmsres, &maxres, 2.0, 100, SHOW_NOTHING);
+
+	sprintf(s,"Results of Y fit : \n");
+	sprintf(filename, "RMS residue %le\n",rmsres);
+	strcat(s, filename);
+	sprintf(filename, "MAX residue %le\n",maxres);
+	strcat(s, filename);
+	sprintf(filename, "Offset    = %f\n",var[1]);
+	strcat(s, filename);
+	sprintf(filename, "Amplitude = %f\n",var[2]);
+	strcat(s, filename);
+	sprintf(filename, "Phase     = %f",var[3]*180.0/M_PI);
+	strcat(s, filename);
+	error(MESSAGE, s);
+
+	y_off = var[1];
+	y_amp = var[2];
+	y_phase = var[3]*180.0/M_PI;
+
+	if (ask_yes_no("Do you wish to try these values?",""))
+	{
+		coude_dichroic_correction_x_amp = x_amp;
+		coude_dichroic_correction_x_phase = x_phase;
+		coude_dichroic_correction_y_amp = y_amp;
+		coude_dichroic_correction_y_phase = x_phase;
+	}
+
+	return NOERROR;
+}

@@ -355,6 +355,8 @@ int compute_reconstructor_new(int argc, char **argv);
 int save_reconstructor_new(char* filename_in);
 int read_actuator_to_sensor(int argc, char **argv);
 int read_actuator_to_aberration(int argc, char **argv);
+void fit_sin_func(float *ftn, float *var, float *param);
+int fit_dichroic_map(int argc, char **argv);
 
 /* labao_tiptilt_data_socket.c */
 

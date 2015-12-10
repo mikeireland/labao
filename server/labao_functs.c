@@ -153,6 +153,7 @@ struct {
 		{"tur",       	toggle_use_reference},
 		{"togref",     	toggle_use_reference},
 		{"dichmap",     start_scope_dichroic_mapping},
+		{"dichfit",     fit_dichroic_map},
 		{"dichroic",	select_dichroic},
 		{"dich",	select_dichroic},
 		{"tcdc",        toggle_coude_dichroic_corrections},
