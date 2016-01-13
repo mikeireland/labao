@@ -59,7 +59,8 @@
 #warning WE NEED TO THINK ABOUT THESE NUMBERS
 #define ZERO_CLAMP 15
 #define DENOM_CLAMP 30
-#define FLUX_DAMPING 0.9
+#define FLUX_MEMORY 0.9
+//#define FLUX_MEMORY 0.0
 
 static const float centroid_window[][CENTROID_WINDOW_WIDTH] = 
 	{{0,1,1,1,0}, 
@@ -128,7 +129,7 @@ static float initial_mapping_az = 90.0;
 static int scope_dichroic_mapping_step = DICHROIC_MAPPING_ALIGN;
 FILE *scope_dichroic_mapping_file;
 
-static int current_total_flux = 0;
+static float current_total_flux = 0.0;
 static bool autoalign_zernike = FALSE;
 static int autoalign_count = 0;
 static int autoalign_x_total = 0;
@@ -244,6 +245,7 @@ void initialize_fsm(void)
 		y_centroid_offsets_reference[i]=0.0;
 		aberration_xc[i]=0.0;
 		aberration_yc[i]=0.0;
+		avg_fluxes[i] = 0.0;
 	}
 	x_centroid_offsets = x_centroid_offsets_beacon;
 	y_centroid_offsets = y_centroid_offsets_beacon;
@@ -1019,6 +1021,7 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 		}
 		else
 		{
+#warning Should this be avg_fluxes[l] instead??
 			new_xc[l] /= fluxes[l];
 			new_yc[l] /= fluxes[l];
 		}
@@ -1047,8 +1050,8 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 	{
 		xc[l] = (new_xc[l] -= aberration_xc[l]);
 		yc[l] = (new_yc[l] -= aberration_yc[l]);
-		avg_fluxes[l] = fluxes[l] *
-				(1-FLUX_DAMPING) + FLUX_DAMPING*avg_fluxes[l];
+		avg_fluxes[l] = fluxes[l] * (1.0 - FLUX_MEMORY) + 
+				FLUX_MEMORY*avg_fluxes[l];
 	}
 	pthread_mutex_unlock(&fsm_mutex);
 
@@ -1154,7 +1157,6 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 		{
 			fsm_xc_int[l]=0.0;
 			fsm_yc_int[l]=0.0;
-			avg_fluxes[l]=0.0;
 		}			
 	}
 
@@ -1164,7 +1166,6 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 	{
 		fsm_xc_int[l] += new_xc[l];
 		fsm_yc_int[l] += new_yc[l];
-		avg_fluxes[l] += fluxes[l];
 	}
 
 	/* Lock the mutex */
@@ -1737,6 +1738,8 @@ int fsm_status(void)
 	char	*args[2];
 	static time_t  last_time = 0;
 	float	theta, x, y;
+	float	flux_mean, flux_stddev, flux_min, flux_max;
+	int	i;
 
 	/* The overall state. */
 
@@ -1826,7 +1829,8 @@ int fsm_status(void)
 	    }
 		
 	    if ( (scope_dichroic_mapping_step == DICHROIC_MAPPING_ROTATE) && 
-	         (fabs(fmod(telescope_status.az - target_telescope_az+180+360,360)-180)<0.1) )
+	         (fabs(fmod(telescope_status.az - 
+			target_telescope_az+180+360,360)-180)<0.1) )
 	    {
 		/* 
  		 * This is only a rough sanity check... !!!
@@ -2296,6 +2300,40 @@ int fsm_status(void)
 		wstandend(status_window);
 		wprintw(status_window, "%6.3f", mean_dm_offset);
 	
+		flux_mean = 0.0;
+		flux_stddev = 0.0;
+		flux_min = 1e32;
+		flux_max = -1e32;
+
+		for (i=0;i<NUM_LENSLETS;i++)
+		{
+			flux_mean += avg_fluxes[i];
+			flux_stddev += (avg_fluxes[i] *  avg_fluxes[i]);
+			if (avg_fluxes[i] > flux_max)
+				flux_max = avg_fluxes[i];
+			if (avg_fluxes[i] < flux_min)
+				flux_min = avg_fluxes[i];
+		}
+		flux_mean /= NUM_LENSLETS;
+		flux_stddev /= NUM_LENSLETS;
+		flux_stddev = sqrt(flux_stddev - flux_mean*flux_mean);
+
+		wstandout(status_window);
+		mvwaddstr(status_window,2,44,"Flux To: ");
+		wstandend(status_window);
+		wprintw(status_window, " %6.1f", current_total_flux);
+
+		wstandout(status_window);
+		mvwaddstr(status_window,3,44,"Flux Mn: ");
+		wstandend(status_window);
+		wprintw(status_window, " %5.1f+-%5.1f", 
+			flux_mean, flux_stddev);
+
+		wstandout(status_window);
+		mvwaddstr(status_window,4,44,"Flux Rg: ");
+		wstandend(status_window);
+		wprintw(status_window, " %5.1f->%5.1f", 
+			flux_min, flux_max);
 	}
 
 	pthread_mutex_unlock(&fsm_mutex);
