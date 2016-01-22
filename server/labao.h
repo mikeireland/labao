@@ -145,6 +145,10 @@ extern struct s_scope_status telescope_status;
 
 extern bool send_tiptilt;
 
+/* For outdated S2 HuT control code */
+
+extern bool include_old_S2_code;
+
 /* labao.c */
 
 int main(int argc, char **argv);

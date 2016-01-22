@@ -2040,7 +2040,7 @@ int fsm_status(void)
 		    {
 			if (x > SCOPE_ALIGN_LIMIT)
 			{
-			    if (this_labao == S2)
+			    if (include_old_S2_code && this_labao == S2)
 			          motor_move.motor = AOB_S2_DICHR_2;
 			    else
 			          motor_move.motor = AOB_DICHR_2;
@@ -2053,7 +2053,7 @@ int fsm_status(void)
 			}
 			else if (x < -1.0*SCOPE_ALIGN_LIMIT)
 			{
-			    if (this_labao == S2)
+			    if (include_old_S2_code && this_labao == S2)
 			          motor_move.motor = AOB_S2_DICHR_2;
 			    else
 			          motor_move.motor = AOB_DICHR_2;
@@ -2073,7 +2073,7 @@ int fsm_status(void)
 		    {
 			if (y > SCOPE_ALIGN_LIMIT)
 			{
-			    if (this_labao == S2)
+			    if (include_old_S2_code && this_labao == S2)
 			        motor_move.motor = AOB_S2_DICHR_1;
 			    else
 			        motor_move.motor = AOB_DICHR_1;
@@ -2086,7 +2086,7 @@ int fsm_status(void)
 			}
 			else if (y < -1.0 * SCOPE_ALIGN_LIMIT)
 			{
-			    if (this_labao == S2)
+			    if (include_old_S2_code && this_labao == S2)
 			        motor_move.motor = AOB_S2_DICHR_1;
 			    else
 			        motor_move.motor = AOB_DICHR_1;
@@ -2238,7 +2238,7 @@ int fsm_status(void)
 		    mess.type = HUT_AOB_MOVE_RELATIVE;
 		    mess.length = sizeof(motor_move);
 		    mess.data = (unsigned char *)&motor_move;
-		    if (this_labao == S2)
+		    if (include_old_S2_code && this_labao == S2)
 			  motor_move.motor = AOB_S2_BEACON_FOC;
 		    else
 			  motor_move.motor = AOB_BEACON_FOC;
@@ -2813,7 +2813,7 @@ int start_autoalign_scope_dichroic(int argc, char **argv)
                 mess.length = sizeof(motor_move);
                 mess.data = (unsigned char *)&motor_move;
 
-	        if (this_labao == S2)
+	        if (include_old_S2_code && this_labao == S2)
                     motor_move.motor = AOB_S2_DICHR_2;
 	        else
                     motor_move.motor = AOB_DICHR_2;
@@ -2829,7 +2829,7 @@ int start_autoalign_scope_dichroic(int argc, char **argv)
 
                 sleep(1);
 
-	        if (this_labao == S2)
+	        if (include_old_S2_code && this_labao == S2)
                     motor_move.motor = AOB_S2_DICHR_1;
 		else
                     motor_move.motor = AOB_DICHR_1;

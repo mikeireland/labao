@@ -23,7 +23,8 @@
 /* 6.0 - No changes but wanted to make the version clearly new.		*/
 /* 6.1 - Added Gail's new reconstructor calculation code.		*/
 /* 7.0 - Trying to make the Zernike stuff make sense.			*/
-/* 7.1 - I did not work.			*/
+/* 7.1 - It did not work.						*/
+/* 7.2 - Added flux total, mean , min and max				*/
 /************************************************************************/
 /*                                                                      */
 /*                    CHARA ARRAY USER INTERFACE			*/
@@ -89,6 +90,7 @@ float    ypos_center = 0.0;
 struct s_scope_status telescope_status;
 bool send_tiptilt = FALSE;
 bool iris_at_beam_size = FALSE;
+bool include_old_S2_code = FALSE;
 
 int main(int argc, char **argv)
 {
@@ -101,6 +103,9 @@ int main(int argc, char **argv)
             {
                 switch(*p)
                 {
+			case 'o': include_old_S2_code = !include_old_S2_code;
+				  break;
+
                         case 's': use_socket_manager = !use_socket_manager;
                                   break;
 
@@ -167,7 +172,7 @@ int main(int argc, char **argv)
 	ui_clear_screen();
 	put_line("");
 
-	sprintf(title,"%s 7.1",labao_name);
+	sprintf(title,"%s 7.2",labao_name);
 	center_line(title);
 	put_line("");
 	center_line("The CHARA Array");
@@ -342,6 +347,7 @@ void print_usage_message(char *name)
         fprintf(stderr,"-h\t\tPrint this message\n");
 	fprintf(stderr,"-j\t\tSet maximum Zernike mode 1..%d (%d)\n", 
 		NUM_LENSLETS, DEFAULT_MAXJ);
+        fprintf(stderr,"-o\t\tToggle use outdate S2 HUT code (OFF)\n");
         fprintf(stderr,"-s\t\tToggle use of socketmanager (ON)\n");
 
 } /* print_usage_message() */
