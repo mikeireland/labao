@@ -936,7 +936,7 @@ int call_save_actuator_to_aberration(int argc, char **argv)
 void run_centroids_and_fsm(CHARA_TIME time_stamp,
 		float **data, int aoi_width, int aoi_height)
 {
-	int i,j,l,left,bottom,box_left, box_bottom, poke_sign;
+	int i,j,ii,jj,l,left,bottom,box_left, box_bottom, poke_sign;
 	float last_servo_gain = 0.0;
 	float new_xc[NUM_LENSLETS];
 	float new_yc[NUM_LENSLETS];
@@ -956,6 +956,7 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 
 	/* First, compute the centroids. */
 
+        get_usb_camera_aoi(&x,&y,&dx,&dy);
 	for (l = 0; l < NUM_LENSLETS; l++)
 	{
 		/* 
@@ -976,9 +977,13 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 			for (i=0;i<CENTROID_BOX_WIDTH;i++)
 			for (j=0;j<CENTROID_BOX_WIDTH;j++)
 			{
-				if (data[box_left+i][box_bottom+j] > max)
+				ii = box_left + i;
+				jj = box_bottom + j;
+				if (ii >= 1 && ii <= dx &&
+				    jj >= 1 && jj <= dy &&
+				    data[ii][jj] > max)
 				{
-					max = data[box_left+i][box_bottom+j];
+					max = data[ii][jj];
 					left = i;
 					bottom = j;
 				}
@@ -1003,12 +1008,17 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 		for (i=0;i<CENTROID_WINDOW_WIDTH;i++)
 		for (j=0;j<CENTROID_WINDOW_WIDTH;j++)
 		{
-			fluxes[l] += centroid_window[i][j] *
-					data[left+i][bottom+j];
-			new_xc[l] += centroid_xw[i][j] *
-					data[left+i][bottom+j];
-			new_yc[l] += centroid_yw[i][j] *
-					data[left+i][bottom+j];
+			ii = left + i;
+			jj = bottom + j;
+			if (ii >= 1 && ii <= dx && jj >= 1 && jj <= dy)
+			{
+				fluxes[l] += centroid_window[i][j] *
+					data[ii][jj];
+				new_xc[l] += centroid_xw[i][j] *
+					data[ii][jj];
+				new_yc[l] += centroid_yw[i][j] *
+					data[ii][jj];
+			}
 		}
 
 		/* Correct for low fluxes (denominator clamping) */
@@ -1027,10 +1037,16 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 
 		/* Correct for box offsets, including half-pixels */
 
-		new_xc[l] -= (x_centroid_offsets[l] -
+		if (left + CENTROID_HW >= 1 &&
+		    left + CENTROID_HW <= dx &&
+		    bottom + CENTROID_HW >= 1 &&
+		    bottom + CENTROID_HW <= dy)
+		{
+		    new_xc[l] -= (x_centroid_offsets[l] -
 				(float)(left + CENTROID_HW));
-		new_yc[l] -= (y_centroid_offsets[l] - 
+		    new_yc[l] -= (y_centroid_offsets[l] - 
 				(float)(bottom + CENTROID_HW));
+		}
 
 		if (fluxes[l] < zero_clamp)
 		{
@@ -1181,7 +1197,6 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 	case FSM_ZERO_CENTROIDS:
 	  	if (fsm_cyclenum == NUM_LABAO_ZERO_AVG)
 		{	
-		    get_usb_camera_aoi(&x,&y,&dx,&dy);
 		    for (l=0;l<NUM_LENSLETS;l++)
 		    {
 			x_centroid_offsets[l]+=fsm_xc_int[l]/NUM_LABAO_ZERO_AVG;
