@@ -25,6 +25,7 @@
 /* 7.0 - Trying to make the Zernike stuff make sense.			*/
 /* 7.1 - It did not work.						*/
 /* 7.2 - Added flux total, mean , min and max				*/
+/* 7.3 - Small bug fix for when boxes are close to the edge.		*/
 /************************************************************************/
 /*                                                                      */
 /*                    CHARA ARRAY USER INTERFACE			*/
@@ -172,7 +173,7 @@ int main(int argc, char **argv)
 	ui_clear_screen();
 	put_line("");
 
-	sprintf(title,"%s 7.2",labao_name);
+	sprintf(title,"%s 7.3",labao_name);
 	center_line(title);
 	put_line("");
 	center_line("The CHARA Array");

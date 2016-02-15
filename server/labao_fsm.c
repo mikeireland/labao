@@ -351,6 +351,7 @@ int load_defaults(char* filename_in)
 	int x,y,dx,dy,i;
 	float xoff_beacon, yoff_beacon;
 	float xoff_reference, yoff_reference;
+	int	retval = 0;
 
 	if (filename_in != NULL)
 	{
@@ -397,12 +398,12 @@ int load_defaults(char* filename_in)
 		if ((xoff_beacon < CLEAR_EDGE) || 
 		    (yoff_beacon < CLEAR_EDGE) || 
 		    (xoff_beacon >= dx-CLEAR_EDGE) || 
-		    (yoff_beacon >= dy-CLEAR_EDGE)) return -8;
+		    (yoff_beacon >= dy-CLEAR_EDGE)) retval =  -8;
 
 		if ((xoff_reference < CLEAR_EDGE) || 
 		    (yoff_reference < CLEAR_EDGE) || 
 		    (xoff_reference >= dx-CLEAR_EDGE) || 
-		    (yoff_reference >= dy-CLEAR_EDGE)) return -8;
+		    (yoff_reference >= dy-CLEAR_EDGE)) retval =  -8;
 
 		x_centroid_offsets_beacon[i] = xoff_beacon;
 		y_centroid_offsets_beacon[i] = yoff_beacon;
@@ -465,17 +466,15 @@ int load_defaults(char* filename_in)
                 return -11;
         }
 
-	/* 
-  	 * Try to set the AOI.
-	 * This was moved so that even if the camera isn't there
-	 * we get a flat wavefront.
-	 */
-
-	if (set_usb_camera_aoi(FALSE, x, y, dx, dy)) return -5;
-
 	/* Set a flat wavefront. */
 	
-	if (flatten_wavefront()) return -9;
+	if (flatten_wavefront()) retval -9;
+
+	/* 
+  	 * Try to set the AOI.
+	 */
+
+	if (set_usb_camera_aoi(FALSE, x, y, dx, dy)) retval -5;
 
 	/* Tell clients */
 
@@ -483,7 +482,7 @@ int load_defaults(char* filename_in)
 
 	fclose(params_file);
 
-	return 0;
+	return retval;
 
 } /* load_defaults() */
 
