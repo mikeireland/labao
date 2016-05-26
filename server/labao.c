@@ -415,6 +415,7 @@ int open_pico_connection(int argc, char **argv)
 
 int open_telescope_connection(int argc, char **argv)
 {
+	struct smessage mess;
 
 	if (telescope_server != -1) close_server_socket(telescope_server);
 
@@ -428,7 +429,14 @@ int open_telescope_connection(int argc, char **argv)
         }
 
 	if (!add_message_job(telescope_server, 
-			TELESCOPE_STATUS, message_telescope_status))
+		TELESCOPE_STATUS, message_telescope_status))
+        {
+                fprintf(stderr,"Failed to add server TELESCOPE_STATUS, job.\n");
+                exit(-8);
+        }
+
+	if (!add_message_job(telescope_server, 
+		HUT_AOB_CHANGE_DICHROIC, message_telescope_change_dichroic))
         {
                 fprintf(stderr,"Failed to add server TELESCOPE_STATUS, job.\n");
                 exit(-8);
@@ -437,7 +445,13 @@ int open_telescope_connection(int argc, char **argv)
 	message(system_window, "Opened connection to Telescope Server.");
 	send_labao_text_message("Opened connection to Telescope Server.");
 
-	return NOERROR;
+	/* Make sure we know which dichroic is in */
+
+	mess.type = HUT_AOB_WHICH_DICHROIC;
+	mess.length = 0;
+	mess. data = NULL;
+
+	return send_message(telescope_server, &mess);
 
 } /* int open_telescope_connection() */
 

@@ -45,8 +45,8 @@
 #define ZERNIKE_ALIGN_LIMIT	0.075
 #define ZERNIKE_ALIGN_STEP	0.005
 #define BEACON_FOCUS_LIMIT 	0.05
-#define BEACON_FOCUS_STEP  	10000
-#define BEACON_FOCUS_GAIN   	100000
+#define BEACON_FOCUS_STEP  	100
+#define BEACON_FOCUS_GAIN   	6000
 
 /* Optionally enforce zero piston. With SERVO_DAMPING < 1 and a reasonable reconstructor,
    this shouldn't be needed */
@@ -3708,23 +3708,6 @@ int select_dichroic(int argc, char **argv)
                                 return NOERROR;
 	}
 
-	switch(dich+1)
-	{
-		case AOB_DICHROIC_GRAY: fsm_flat_dm = fsm_flat_dm_gray;
-					current_dichroic = AOB_DICHROIC_GRAY;
-					break;
-
-		case AOB_DICHROIC_SPARE: fsm_flat_dm = fsm_flat_dm_spare;
-					current_dichroic = AOB_DICHROIC_SPARE;
-					break;
-
-		case AOB_DICHROIC_YSO: fsm_flat_dm = fsm_flat_dm_yso;
-					current_dichroic = AOB_DICHROIC_YSO;
-					break;
-
-		default: return error(ERROR,"Unknown dichroic.");
-	}
-
 	mess.type = HUT_AOB_CHANGE_DICHROIC;
 	mess.length = sizeof(int);
 	mess.data = (unsigned char *)&current_dichroic;
@@ -3741,29 +3724,71 @@ int select_dichroic(int argc, char **argv)
 /************************************************************************/
 /* message_aob_change_dichroic() 					*/
 /*									*/
+/* For when a client asks for a dichroic change.			*/
 /************************************************************************/
 
 int message_aob_change_dichroic(struct smessage *message)
 {
-	int	data;
-	char	*argv[2];
+	int     data;
+        char    *argv[2];
 
-	if (message->length != sizeof(int))
-	{
-		return error(ERROR,"Got AOB_CHANGE_DICHROIC with wrong data.");
-	}
+        if (message->length != sizeof(int))
+        {
+                return error(ERROR,"Got AOB_CHANGE_DICHROIC with wrong data.");
+        }
 
-	data = *((int *)message->data);
+        data = *((int *)message->data);
 
-	if (data < 1 || data > 3)
-		return error(ERROR,"Got non-existant Dichroic");
+        if (data < 1 || data > 3)
+                return error(ERROR,"Got non-existant Dichroic");
 
-	argv[0] = "dich";
-	argv[1] = dichroic_types[data-1];
+        argv[0] = "dich";
+        argv[1] = dichroic_types[data-1];
 
-	return select_dichroic(2, argv);
+        return select_dichroic(2, argv);
 
 } /* message_aob_change_dichroic() */
+
+/************************************************************************/
+/* message_telescope_change_dichroic()                                  */
+/*                                                                      */
+/* For when the telescope server tells us about a dichroic change.	*/
+/************************************************************************/
+
+int message_telescope_change_dichroic(int server, struct smessage *mess)
+{
+        int     data;
+
+        if (mess->length != sizeof(int))
+        {
+                return error(ERROR,"Got AOB_CHANGE_DICHROIC with wrong data.");
+        }
+
+        data = *((int *)mess->data);
+
+        switch(data)
+        {
+                case AOB_DICHROIC_GRAY: fsm_flat_dm = fsm_flat_dm_gray;
+                                        current_dichroic = AOB_DICHROIC_GRAY;
+                                        break;
+
+                case AOB_DICHROIC_SPARE: fsm_flat_dm = fsm_flat_dm_spare;
+                                        current_dichroic = AOB_DICHROIC_SPARE;
+                                        break;
+
+                case AOB_DICHROIC_YSO: fsm_flat_dm = fsm_flat_dm_yso;
+                                        current_dichroic = AOB_DICHROIC_YSO;
+                                        break;
+
+                default: return error(ERROR,"Unknown dichroic.");
+        }
+
+        message(system_window,"Got dichroic %s", 
+		dichroic_types[current_dichroic - 1]);
+
+        return NOERROR;
+
+} /* message_telescope_change_dichroic() */
 
 /************************************************************************/
 /* toggle_coude_dichroic_corrections() 		    			*/

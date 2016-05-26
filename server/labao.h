@@ -351,6 +351,7 @@ void use_reference_off(void);
 int start_scope_dichroic_mapping(int argc, char **argv);
 int select_dichroic(int argc, char **argv);
 int message_aob_change_dichroic(struct smessage *message);
+int message_telescope_change_dichroic(int server, struct smessage *message);
 int toggle_coude_dichroic_corrections(int argc, char **argv);
 int edit_coude_dichroic_corrections(int argc, char **argv);
 int edit_dm_impulse(int argc, char **argv);
