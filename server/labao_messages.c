@@ -122,6 +122,8 @@ void setup_standard_labao_messages(void)
                 message_labao_toggle_reference);
 	ui_add_message_job(LABAO_MOVE_BOXES, message_labao_move_boxes);
 	ui_add_message_job(LABAO_SET_THRESHOLD, message_labao_set_threshold);
+        ui_add_message_job(LABAO_START_AUTOALIGN_BEACON_FOCUS, 
+		message_labao_start_autoalign_beacon_focus);
 
 
 } /* setup_standard_labao_messages() */
@@ -777,3 +779,29 @@ int message_labao_set_threshold(struct smessage *message)
 	return set_image_threshold(2, args);
 
 } /* message_labao_set_threshold() */
+
+/************************************************************************/
+/* message_labao_start_autoalign_beacon_focus()                         */
+/*                                                                      */
+/************************************************************************/
+
+int message_labao_start_autoalign_beacon_focus(struct smessage *message)
+{
+	char	*args[2];
+	char	argv1[30];
+	int	tries;
+
+	if (message->length != sizeof(int))
+    		return error(ERROR,
+		"Got LABAO_START_AUTOALIGN_BEACO_FOCUS with wrong data.");
+
+	tries = *((int *)message->data);
+
+	sprintf(argv1,"%d", tries);
+
+	args[0] = "afoc";
+	args[1] = argv1;
+
+	return start_autoalign_beacon_focus(2, args);
+
+} /* message_labao_start_autoalign_beacon_focus() */

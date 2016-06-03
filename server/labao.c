@@ -451,7 +451,9 @@ int open_telescope_connection(int argc, char **argv)
 	mess.length = 0;
 	mess. data = NULL;
 
-	return send_message(telescope_server, &mess);
+	send_message(telescope_server, &mess);
+
+	return NOERROR;
 
 } /* int open_telescope_connection() */
 

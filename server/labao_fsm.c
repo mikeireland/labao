@@ -950,6 +950,7 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 	float outer_dm_mean = 0.0;
 	float x_offset = 0.0, y_offset = 0.0, total_flux = 0.0;
 	float	xtilt = 0.0, ytilt = 0.0, focus = 0.0;
+	float	xtilt_offset = 0.0, ytilt_offset = 0.0, flux_offset;
 	float   a1 = 0.0, a2 = 0.0, c1=0.0, c2=0.0;
 	float	xpos = 0.0, ypos = 0.0;
 	float	xwfs, ywfs, theta, sintheta, costheta;
@@ -1030,7 +1031,6 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 		}
 		else
 		{
-#warning Should this be avg_fluxes[l] instead??
 			new_xc[l] /= fluxes[l];
 			new_yc[l] /= fluxes[l];
 		}
@@ -1366,20 +1366,22 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 
 		    /* 
  		     * If needed, find the overall tilt. 
- 		     * NB This requires that all 
-		     * lenslets are illuminated!
-		     * It probably needs to be a weighted average.
 		     */
+
+		    xtilt_offset = 0.0;
+		    ytilt_offset = 0.0;
+		    flux_offset = 0.0;
 
 		    if (fsm_ignore_tilt)
 		    {
 			for (l=0;l<NUM_LENSLETS;l++)
 			{
-				xtilt += new_xc[l];
-				ytilt += new_xc[l];
+				xtilt_offset += (new_xc[l] * fluxes[l]);
+				ytilt_offset += (new_yc[l] * fluxes[l]);
+				flux_offset += fluxes[l];
 			}
-			xtilt /= NUM_LENSLETS;
-			ytilt /= NUM_LENSLETS;
+			xtilt_offset /= flux_offset;
+			ytilt_offset /= flux_offset;
 		    }
 
 		    /* Apply the reconstructor and get the delta for the DM */
@@ -1389,9 +1391,9 @@ void run_centroids_and_fsm(CHARA_TIME time_stamp,
 		    {
 			fsm_dm_error[i] -= 
 				(fsm_reconstructor[i][l] *
-				(new_xc[l] - xtilt) +
+				(new_xc[l] - xtilt_offset) +
 				fsm_reconstructor[i][NUM_LENSLETS+l] *
-				(new_yc[l] - ytilt));
+				(new_yc[l] - ytilt_offset));
 		    }
 		    mean_dm_error += fsm_dm_error[i];
 
