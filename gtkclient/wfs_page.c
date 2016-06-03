@@ -445,7 +445,7 @@ void fill_wfs_page(GtkWidget *vbox)
 
 	label = gtk_label_new("ALIGN:");
         gtk_box_pack_start(GTK_BOX(hbox), label , TRUE, TRUE, 0);
-        gtk_widget_set_usize (label, LABAO_WIDTH/15, LABAO_HEIGHT);
+        gtk_widget_set_usize (label, LABAO_WIDTH/13, LABAO_HEIGHT);
         gtk_widget_show(label);
 
 	tries_entry = gtk_entry_new ();
@@ -459,7 +459,7 @@ void fill_wfs_page(GtkWidget *vbox)
                 GTK_SIGNAL_FUNC (labao_autoalign_lab_callback), NULL);
         gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
         gtk_container_set_border_width (GTK_CONTAINER(button),1);
-        gtk_widget_set_usize (button, LABAO_WIDTH/5, LABAO_HEIGHT);
+        gtk_widget_set_usize (button, 4*LABAO_WIDTH/25, LABAO_HEIGHT);
         gtk_widget_show(button);
 
         button = gtk_button_new_with_label ("SCOPE");
@@ -467,7 +467,15 @@ void fill_wfs_page(GtkWidget *vbox)
                 GTK_SIGNAL_FUNC (labao_autoalign_scope_callback), NULL);
         gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
         gtk_container_set_border_width (GTK_CONTAINER(button),1);
-        gtk_widget_set_usize (button, LABAO_WIDTH/5, LABAO_HEIGHT);
+        gtk_widget_set_usize (button, 4*LABAO_WIDTH/25, LABAO_HEIGHT);
+        gtk_widget_show(button);
+
+        button = gtk_button_new_with_label ("BEACON FOC");
+	gtk_signal_connect (GTK_OBJECT (button), "clicked",
+                GTK_SIGNAL_FUNC (labao_autoalign_beacon_focus_callback), NULL);
+        gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
+        gtk_container_set_border_width (GTK_CONTAINER(button),1);
+        gtk_widget_set_usize (button, 4*LABAO_WIDTH/25, LABAO_HEIGHT);
         gtk_widget_show(button);
 
         button = gtk_button_new_with_label ("ZERNIKE");
@@ -475,7 +483,7 @@ void fill_wfs_page(GtkWidget *vbox)
                 GTK_SIGNAL_FUNC (labao_autoalign_zernike_callback), NULL);
         gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
         gtk_container_set_border_width (GTK_CONTAINER(button),1);
-        gtk_widget_set_usize (button, LABAO_WIDTH/5, LABAO_HEIGHT);
+        gtk_widget_set_usize (button, 4*LABAO_WIDTH/25, LABAO_HEIGHT);
         gtk_widget_show(button);
 
         button = gtk_button_new_with_label ("STOP ALIGN");
@@ -484,7 +492,7 @@ void fill_wfs_page(GtkWidget *vbox)
                 (gpointer)(message_array+LABAO_STOP_AUTOALIGN));
         gtk_box_pack_start(GTK_BOX(hbox), button, TRUE, TRUE, 0);
         gtk_container_set_border_width (GTK_CONTAINER(button),1);
-        gtk_widget_set_usize (button, LABAO_WIDTH/5, LABAO_HEIGHT);
+        gtk_widget_set_usize (button, 4*LABAO_WIDTH/25, LABAO_HEIGHT);
         gtk_widget_show(button);
 
 } /* fill_wfs_page() */
@@ -544,6 +552,35 @@ void labao_autoalign_scope_callback(GtkButton *button, gpointer data)
 
 } /* labao_autoalign_scope_callback() */
 
+/************************************************************************/
+/* labao_autoalign_beacon_focus_callback()				*/
+/*									*/
+/* Start auto alignment.						*/
+/************************************************************************/
+
+void labao_autoalign_beacon_focus_callback(GtkButton *button, gpointer data)
+{
+        struct smessage mess;
+	int	tries;
+        char    *entry;
+
+        entry = (char *)gtk_entry_get_text(GTK_ENTRY(tries_entry));
+        sscanf(entry,"%d", &tries);
+
+        mess.type = LABAO_START_AUTOALIGN_BEACON_FOCUS;
+        mess.length = sizeof(int);
+        mess.data = (unsigned char *)&tries;
+
+        if (!send_message(server, &mess))
+        {
+          print_status(ERROR,
+		"Failed to send LABAO_START_AUTOALIGN_BEACON_FOCUS message.\n");
+        }
+
+} /* labao_autoalign_beacon_focus_callback() */
+
+/************************************************************************/
+/* labao_autoalign_zernike_callback()					*/
 /************************************************************************/
 /* labao_autoalign_zernike_callback()					*/
 /*									*/
